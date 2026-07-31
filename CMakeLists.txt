@@ -65,6 +65,39 @@ add_definitions(${LLVM_DEFINITIONS_LIST})
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
 
+# ---- Windows: prune stale absolute paths from LLVM's exported targets -------
+# The official clang+llvm Windows release bakes absolute paths from the machine
+# that built it into its exported link interfaces — most visibly the DIA SDK's
+# diaguids.lib under a Visual Studio 2019 install that exists nowhere else.
+# Linking anything against those components then fails at generate time with
+# "missing and no known rule to make it", before a single file is compiled.
+#
+# Drop link-interface entries naming an absolute path that does not exist.  If
+# one of them turns out to be genuinely needed, the link fails with an
+# unresolved symbol rather than a confusing missing-file error, and the STATUS
+# line below says exactly what was removed.
+if(WIN32)
+  foreach(_kagura_llvm_target IN LISTS LLVM_AVAILABLE_LIBS)
+    if(NOT TARGET ${_kagura_llvm_target})
+      continue()
+    endif()
+    get_target_property(_kagura_link_libs ${_kagura_llvm_target} INTERFACE_LINK_LIBRARIES)
+    if(NOT _kagura_link_libs)
+      continue()
+    endif()
+    set(_kagura_kept_libs "")
+    foreach(_kagura_lib IN LISTS _kagura_link_libs)
+      if(IS_ABSOLUTE "${_kagura_lib}" AND NOT EXISTS "${_kagura_lib}")
+        message(STATUS "[kagura] ${_kagura_llvm_target}: dropping missing link dependency ${_kagura_lib}")
+      else()
+        list(APPEND _kagura_kept_libs "${_kagura_lib}")
+      endif()
+    endforeach()
+    set_target_properties(${_kagura_llvm_target} PROPERTIES
+      INTERFACE_LINK_LIBRARIES "${_kagura_kept_libs}")
+  endforeach()
+endif()
+
 # Kagura includes
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
