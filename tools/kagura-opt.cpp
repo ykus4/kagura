@@ -25,11 +25,20 @@
 //
 // Implementation note
 // -------------------
-// kagura-opt loads the kagura plugin at runtime via PassPlugin::Load() rather
-// than linking against it statically.  This avoids the MODULE_LIBRARY linkage
-// restriction and header-search-path issues that arise when Plugin.cpp is
-// compiled a second time in a different target.  The plugin path is resolved
-// from the same directory as the kagura-opt executable (build/bin/../lib/).
+// kagura-opt has two linkage modes, selected at configure time:
+//
+//   Shared (default).  The plugin is loaded at runtime via PassPlugin::Load().
+//   This avoids the MODULE_LIBRARY linkage restriction and header-search-path
+//   issues that arise when Plugin.cpp is compiled a second time in a different
+//   target.  The plugin path is resolved from the same directory as the
+//   kagura-opt executable (build/bin/../lib/).
+//
+//   Static (KAGURA_STATIC_PLUGIN).  The passes are linked into this binary and
+//   registered by calling getKaguraPluginInfo() directly.  Required on
+//   platforms where LLVM cannot build loadable modules — notably the
+//   MSVC-targeted Windows toolchain, where LLVM_ENABLE_PLUGINS is OFF and
+//   neither `-fpass-plugin` nor `opt --load-pass-plugin` is available.  On
+//   those platforms kagura-opt is the supported way to run the passes.
 //
 //===----------------------------------------------------------------------===//
 
@@ -59,6 +68,14 @@
 
 using namespace llvm;
 
+#ifdef KAGURA_STATIC_PLUGIN
+// Defined in lib/Transforms/Plugin.cpp, linked in from the static
+// KaguraObfuscator library.  This is the same PassPluginLibraryInfo that
+// llvmGetPassPluginInfo() returns to a dlopen()ing host; calling it directly
+// is what lets the passes run without a loadable module.
+llvm::PassPluginLibraryInfo getKaguraPluginInfo();
+#endif
+
 // ---- CLI options ------------------------------------------------------------
 
 static cl::opt<std::string> InputFilename(
@@ -78,10 +95,14 @@ static cl::opt<char> OptLevel(
 
 static cl::opt<std::string> PluginPath(
     "load-kagura",
-    cl::desc("Path to libKaguraObfuscator plugin (default: auto-detect)"),
+    cl::desc("Path to libKaguraObfuscator plugin (default: auto-detect; "
+             "ignored in static builds)"),
     cl::init(""));
 
 // ---- Plugin path auto-detection ---------------------------------------------
+// Only needed in shared mode; a static build has the passes linked in and
+// never looks for a module on disk.
+#ifndef KAGURA_STATIC_PLUGIN
 
 static std::string getExplicitPluginPath(int argc, char **argv) {
   StringRef Prefix("-load-kagura=");
@@ -136,11 +157,18 @@ static std::string findPlugin(const char *Argv0, StringRef ExplicitPath) {
   return "";
 }
 
+#endif // !KAGURA_STATIC_PLUGIN
+
 // ---- Main -------------------------------------------------------------------
 
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
 
+#ifdef KAGURA_STATIC_PLUGIN
+  // The passes are linked into this binary, so there is nothing to load and
+  // the -kagura-* cl::opts are already registered by static initialisation.
+  PassPluginLibraryInfo KaguraInfo = getKaguraPluginInfo();
+#else
   // Load the kagura plugin before parsing command-line options.  The plugin
   // owns the -kagura-* cl::opts, so parsing first would reject those flags as
   // unknown.
@@ -157,9 +185,16 @@ int main(int argc, char **argv) {
                        << toString(PluginOrErr.takeError()) << '\n';
     return 1;
   }
+#endif
 
   cl::ParseCommandLineOptions(argc, argv,
                                "kagura-opt -- apply kagura obfuscation passes\n");
+
+#ifdef KAGURA_STATIC_PLUGIN
+  if (!PluginPath.empty())
+    WithColor::warning() << "-load-kagura is ignored: the passes are linked "
+                            "into this binary.\n";
+#endif
 
   // Load the input module
   LLVMContext Ctx;
@@ -197,7 +232,11 @@ int main(int argc, char **argv) {
 
   // Construct the pass pipeline with the kagura plugin registered.
   PassBuilder PB(nullptr, PipelineTuningOptions(), std::nullopt, &PIC);
+#ifdef KAGURA_STATIC_PLUGIN
+  KaguraInfo.RegisterPassBuilderCallbacks(PB);
+#else
   PluginOrErr->registerPassBuilderCallbacks(PB);
+#endif
 
   PB.registerModuleAnalyses(MAM);
   PB.registerCGSCCAnalyses(CGAM);

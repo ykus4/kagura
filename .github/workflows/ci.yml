@@ -106,17 +106,79 @@ jobs:
             -DCMAKE_CXX_COMPILER="$env:CLANG_CL" `
             -DLLVM_DIR="$env:LLVM_CMAKE_DIR" `
             -DKAGURA_BUILD_TESTS=ON `
-            -DKAGURA_BITCODE_TOOLS=OFF
+            -DKAGURA_BITCODE_TOOLS=ON
 
       - name: Build
         shell: pwsh
         run: cmake --build build
 
+      # The Windows LLVM tarball sets LLVM_ENABLE_PLUGINS=OFF, so the passes are
+      # linked into kagura-opt and the test suite drives them through that tool.
+      # Until kagura-opt was buildable here this job only proved the sources
+      # compiled — nothing actually ran the passes on Windows.
       - name: Test
         shell: pwsh
         run: |
           cd build
           ctest --output-on-failure
+
+      - name: Smoke test kagura-opt
+        shell: pwsh
+        run: |
+          $opt = "build\bin\kagura-opt.exe"
+          if (-not (Test-Path $opt)) { Write-Error "kagura-opt.exe not built"; exit 1 }
+          & $opt -kagura-fla -S tests\lit\control-flow-flattening.ll -o out.ll
+          if ($LASTEXITCODE -ne 0) { Write-Error "kagura-opt failed"; exit 1 }
+          if (-not (Select-String -Path out.ll -Pattern "switch i32" -Quiet)) {
+            Write-Error "flattening produced no dispatcher switch"; exit 1
+          }
+          Write-Host "kagura-opt OK — flattening dispatcher present"
+
+  # ---- Static-plugin linkage (Windows path, exercised on Linux) ------------
+  # The Windows job above is the only place the static-plugin path runs for
+  # real, and it is the slowest to iterate on.  KAGURA_FORCE_STATIC_PLUGIN
+  # selects the same linkage — passes compiled into a static archive, reached
+  # through kagura-opt's getKaguraPluginInfo() call instead of a loadable
+  # module — on a platform where loadable modules would otherwise be used.
+  # A break in the Windows linkage shows up here first, and cheaply.
+  static-plugin:
+    name: Build & Test (static plugin linkage)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 19
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          sudo add-apt-repository -y "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main"
+          sudo apt-get update
+          sudo apt-get install -y llvm-19-dev clang-19
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR=/usr/lib/llvm-19/lib/cmake/llvm \
+            -DCMAKE_C_COMPILER=clang-19 \
+            -DCMAKE_CXX_COMPILER=clang++-19 \
+            -DKAGURA_FORCE_STATIC_PLUGIN=ON \
+            -DKAGURA_BITCODE_TOOLS=ON \
+            -DKAGURA_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Verify no loadable module was produced
+        run: |
+          if ls build/lib/Transforms/*.so 2>/dev/null; then
+            echo "expected a static archive, found a shared module"; exit 1
+          fi
+          test -f build/lib/Transforms/libKaguraObfuscator.a
+          test -f build/bin/kagura-opt
+
+      - name: Test
+        run: cd build && ctest --output-on-failure -j$(nproc)
 
   # ---- 4.7.4 NDK version matrix (Android cross-compile, Ubuntu) --------
   ndk-matrix:

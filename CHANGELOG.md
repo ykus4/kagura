@@ -5,6 +5,33 @@ All notable changes to Kagura are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Windows: a working way to run the passes.** `-fpass-plugin` is unavailable
+  on Windows because the MSVC-targeted LLVM ships with
+  `LLVM_ENABLE_PLUGINS=OFF`, and the static `KaguraObfuscator.lib` the build
+  produced there had no consumer — the documented "link it into your driver
+  tool" had no such tool. `kagura-opt` now links the passes in and registers
+  them by calling `getKaguraPluginInfo()` directly, so building with
+  `-DKAGURA_BITCODE_TOOLS=ON` gives Windows users an IR-level entry point.
+- **`KAGURA_FORCE_STATIC_PLUGIN`** — selects the same static-linkage path on
+  macOS and Linux, so the Windows build can be reproduced without a Windows
+  machine. CI runs this configuration on Linux.
+
+### Fixed
+
+- **Windows CI verified nothing.** With no loadable module, the entire test
+  suite short-circuited to a single `echo`, so a green Windows job only meant
+  the sources compiled. The suite now drives the passes through `kagura-opt`
+  on that platform.
+- The static `KaguraObfuscator` archive no longer links the imported LLVM
+  targets. It never needed to resolve those symbols itself, and inheriting
+  their `INTERFACE` include directories as `-isystem` put the macOS SDK C
+  headers ahead of libc++, breaking `<cstddef>`. Consumers link the components
+  (`Core`, `Support`, `Analysis`, `TransformUtils`, `Passes`) instead.
+
 ## [0.2.0] — 2026-06-30
 
 A wide-coverage release. Two new IR passes, three platform attestation

@@ -111,6 +111,29 @@ endif()
 option(KAGURA_BITCODE_TOOLS "Build kagura-opt bitcode processing tool" OFF)
 # --------------------------------------------------------------------------
 
+# ---- Plugin linkage mode ----------------------------------------------------
+# LLVM cannot build loadable pass modules everywhere — the MSVC-targeted
+# Windows tarball ships LLVM_ENABLE_PLUGINS=OFF, so `-fpass-plugin` and
+# `opt --load-pass-plugin` are both unavailable there.  On those platforms the
+# passes are built as a static library and linked directly into a driver tool
+# (kagura-opt), which calls getKaguraPluginInfo() instead of dlopen()ing a
+# module.
+#
+# KAGURA_FORCE_STATIC_PLUGIN=ON selects that same path on a host where loadable
+# modules *are* available, so the Windows linkage can be exercised from macOS
+# and Linux CI without a Windows machine.
+option(KAGURA_FORCE_STATIC_PLUGIN
+       "Link the passes statically into kagura-opt even where loadable modules work" OFF)
+
+if(LLVM_ENABLE_PLUGINS AND NOT KAGURA_FORCE_STATIC_PLUGIN)
+  set(KAGURA_PLUGIN_STATIC OFF)
+  message(STATUS "[kagura] Plugin linkage: loadable module (-fpass-plugin)")
+else()
+  set(KAGURA_PLUGIN_STATIC ON)
+  message(STATUS "[kagura] Plugin linkage: static library (link into kagura-opt)")
+endif()
+# --------------------------------------------------------------------------
+
 # Passes (loaded as plugin via -fpass-plugin)
 add_subdirectory(lib)
 

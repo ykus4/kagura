@@ -6,6 +6,13 @@ Built on the **New Pass Manager** (LLVM 17+). Loaded as a pass plugin via `-fpas
 
 **Supported platforms:** iOS · Android · macOS · Windows (MSVC/Clang-CL) · Linux · WebAssembly
 
+!!! warning "Windows uses a different entry point"
+
+    `-fpass-plugin` is unavailable on Windows — the MSVC-targeted LLVM ships with
+    `LLVM_ENABLE_PLUGINS=OFF`, so there is no loadable module. The passes link
+    statically into `kagura-opt` and run over IR instead. See
+    [Build from Source](getting-started/build-from-source.md).
+
 !!! tip "New here?"
     Start with the [**Quick Start**](getting-started/quick-start.md) — five
     minutes from install to your first obfuscated binary.

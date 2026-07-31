@@ -1,7 +1,13 @@
 # kagura-opt: standalone bitcode processing tool
 #
-# Loads libKaguraObfuscator at runtime via PassPlugin::Load() — no static link
-# against the MODULE.  This avoids the MODULE_LIBRARY linkage restriction.
+# Shared mode (default): loads libKaguraObfuscator at runtime via
+# PassPlugin::Load() — no static link against the MODULE.  This avoids the
+# MODULE_LIBRARY linkage restriction.
+#
+# Static mode (KAGURA_PLUGIN_STATIC): links the passes in and calls
+# getKaguraPluginInfo() directly.  Used where LLVM has no loadable-module
+# support — notably Windows/MSVC, where this tool is the only way to run the
+# passes since -fpass-plugin is unavailable.
 #
 # We use add_llvm_executable (from LLVM's AddLLVM.cmake) instead of plain
 # add_executable so that llvm_update_compile_flags() is applied.  Without it,
@@ -22,6 +28,9 @@ add_llvm_executable(kagura-opt
 if(LLVM_LINK_LLVM_DYLIB)
   set(KAGURA_OPT_LLVM_LIBS LLVM)
 else()
+  # Analysis and TransformUtils are what the passes themselves need: the static
+  # KaguraObfuscator archive does not link LLVM, so the executable has to cover
+  # its dependencies too.
   llvm_map_components_to_libnames(KAGURA_OPT_LLVM_LIBS
     Core
     Support
@@ -29,12 +38,22 @@ else()
     BitWriter
     BitReader
     Passes
+    Analysis
+    TransformUtils
   )
 endif()
 
 target_link_libraries(kagura-opt PRIVATE
   ${KAGURA_OPT_LLVM_LIBS}
 )
+
+# Static mode: link the passes in and switch kagura-opt to the direct
+# getKaguraPluginInfo() call.  KaguraObfuscator must come before the LLVM
+# component libs it depends on, which target_link_libraries already handles.
+if(KAGURA_PLUGIN_STATIC)
+  target_compile_definitions(kagura-opt PRIVATE KAGURA_STATIC_PLUGIN=1)
+  target_link_libraries(kagura-opt PRIVATE KaguraObfuscator)
+endif()
 
 target_include_directories(kagura-opt PRIVATE
   ${CMAKE_SOURCE_DIR}/include
