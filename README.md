@@ -29,6 +29,10 @@ Built on the **New Pass Manager** (LLVM 17+). Loaded as a pass plugin via `-fpas
 
 **Supported platforms:** iOS · Android · macOS · Windows (MSVC/Clang-CL) · Linux · WebAssembly
 
+> On Windows, `-fpass-plugin` is unavailable (the MSVC-targeted LLVM ships with
+> `LLVM_ENABLE_PLUGINS=OFF`). The passes link statically into `kagura-opt` and run over
+> IR instead — see [Build from Source](docs/getting-started/build-from-source.md).
+
 ## What it protects against
 
 | Threat | Countermeasure |

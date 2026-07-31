@@ -6,6 +6,10 @@ LLVM 17+ の **New Pass Manager** 上に構築。`-fpass-plugin` でパスプラ
 
 **対応プラットフォーム:** iOS · Android · macOS · Windows (MSVC/Clang-CL) · Linux · WebAssembly
 
+!!! warning "Windows は入口が異なります"
+
+    Windows では `-fpass-plugin` は使えません。MSVC 向けの LLVM が `LLVM_ENABLE_PLUGINS=OFF` で配布されており、ロード可能モジュールが存在しないためです。パスは `kagura-opt` に静的リンクされ、IR に対して実行します。詳細は [ソースからビルド](getting-started/build-from-source.md) を参照してください。
+
 !!! tip "はじめての方"
     [**クイックスタート**](getting-started/quick-start.md) からどうぞ。インストールから最初の難読化バイナリまで5分で進めます。
 

@@ -2,16 +2,48 @@ find_package(LLVM REQUIRED CONFIG)
 
 # Plugin-based tests (opt --load-pass-plugin) require a loadable module (.so/.dylib/.dll).
 # When LLVM is built without plugin support — e.g. the MSVC-targeted Windows tarball sets
-# LLVM_ENABLE_PLUGINS=OFF — the static .lib cannot be loaded at runtime, so skip all
-# pass tests and register one dummy test so CTest exits 0 rather than "no tests found".
-if(NOT LLVM_ENABLE_PLUGINS)
-  message(STATUS "[kagura] Tests skipped: LLVM_ENABLE_PLUGINS=OFF")
-  message(STATUS "[kagura]   opt --load-pass-plugin requires a DLL, not a static library.")
-  message(STATUS "[kagura]   Build validation is covered by the Build step.")
-  add_test(NAME kagura_static_build_ok
-    COMMAND ${CMAKE_COMMAND} -E echo
-      "Static build OK — plugin tests skipped (LLVM_ENABLE_PLUGINS=OFF)"
-  )
+# LLVM_ENABLE_PLUGINS=OFF — there is no module to load.  The passes are still reachable
+# through kagura-opt, which links them in statically, so run the smoke tests through that
+# tool instead of leaving the platform completely untested.
+if(KAGURA_PLUGIN_STATIC)
+  if(NOT KAGURA_BITCODE_TOOLS)
+    message(STATUS "[kagura] Tests skipped: static plugin build without kagura-opt.")
+    message(STATUS "[kagura]   Configure with -DKAGURA_BITCODE_TOOLS=ON to run pass tests here.")
+    add_test(NAME kagura_static_build_ok
+      COMMAND ${CMAKE_COMMAND} -E echo
+        "Static build OK — pass tests skipped (KAGURA_BITCODE_TOOLS=OFF)"
+    )
+    return()
+  endif()
+
+  message(STATUS "[kagura] Static plugin build — running pass tests via kagura-opt")
+
+  # One pass per test, driven through the statically linked tool.  The marker is
+  # checked against the transformed IR so a silently-inert pass fails the test.
+  macro(kagura_add_tool_test TEST_NAME FLAG INPUT_FILE EXPECT_MARKER)
+    add_test(NAME ${TEST_NAME}
+      COMMAND ${CMAKE_COMMAND}
+        -DKAGURA_OPT=$<TARGET_FILE:kagura-opt>
+        -DFLAG=${FLAG}
+        -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/lit/${INPUT_FILE}
+        -DEXPECT=${EXPECT_MARKER}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/run_tool_test.cmake
+    )
+  endmacro()
+
+  kagura_add_tool_test(test_static_flattening
+    kagura-fla control-flow-flattening.ll "switch i32")
+  kagura_add_tool_test(test_static_string_encryption
+    kagura-str string-encryption.ll "@kagura_enc_")
+  # kagura-opt runs the default -O2 pipeline, which folds this input's opaque
+  # predicates back down, so there is no bogus-CF marker left to match on.  The
+  # assertion here is the weaker "the module survives the pass" — the stronger
+  # structural checks live in the lit suite, which needs a loadable module.
+  kagura_add_tool_test(test_static_bogus_cf
+    kagura-bcf bogus-control-flow.ll "@classify")
+  kagura_add_tool_test(test_static_substitution
+    kagura-sub substitution.ll "define i32 @arith")
+
   return()
 endif()
 

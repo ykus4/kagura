@@ -65,6 +65,39 @@ add_definitions(${LLVM_DEFINITIONS_LIST})
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
 
+# ---- Windows: prune stale absolute paths from LLVM's exported targets -------
+# The official clang+llvm Windows release bakes absolute paths from the machine
+# that built it into its exported link interfaces — most visibly the DIA SDK's
+# diaguids.lib under a Visual Studio 2019 install that exists nowhere else.
+# Linking anything against those components then fails at generate time with
+# "missing and no known rule to make it", before a single file is compiled.
+#
+# Drop link-interface entries naming an absolute path that does not exist.  If
+# one of them turns out to be genuinely needed, the link fails with an
+# unresolved symbol rather than a confusing missing-file error, and the STATUS
+# line below says exactly what was removed.
+if(WIN32)
+  foreach(_kagura_llvm_target IN LISTS LLVM_AVAILABLE_LIBS)
+    if(NOT TARGET ${_kagura_llvm_target})
+      continue()
+    endif()
+    get_target_property(_kagura_link_libs ${_kagura_llvm_target} INTERFACE_LINK_LIBRARIES)
+    if(NOT _kagura_link_libs)
+      continue()
+    endif()
+    set(_kagura_kept_libs "")
+    foreach(_kagura_lib IN LISTS _kagura_link_libs)
+      if(IS_ABSOLUTE "${_kagura_lib}" AND NOT EXISTS "${_kagura_lib}")
+        message(STATUS "[kagura] ${_kagura_llvm_target}: dropping missing link dependency ${_kagura_lib}")
+      else()
+        list(APPEND _kagura_kept_libs "${_kagura_lib}")
+      endif()
+    endforeach()
+    set_target_properties(${_kagura_llvm_target} PROPERTIES
+      INTERFACE_LINK_LIBRARIES "${_kagura_kept_libs}")
+  endforeach()
+endif()
+
 # Kagura includes
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
@@ -109,6 +142,29 @@ endif()
 # that wraps `opt` and auto-loads the kagura plugin, so users can run kagura
 # passes on .bc / .ll files without needing a full clang invocation.
 option(KAGURA_BITCODE_TOOLS "Build kagura-opt bitcode processing tool" OFF)
+# --------------------------------------------------------------------------
+
+# ---- Plugin linkage mode ----------------------------------------------------
+# LLVM cannot build loadable pass modules everywhere — the MSVC-targeted
+# Windows tarball ships LLVM_ENABLE_PLUGINS=OFF, so `-fpass-plugin` and
+# `opt --load-pass-plugin` are both unavailable there.  On those platforms the
+# passes are built as a static library and linked directly into a driver tool
+# (kagura-opt), which calls getKaguraPluginInfo() instead of dlopen()ing a
+# module.
+#
+# KAGURA_FORCE_STATIC_PLUGIN=ON selects that same path on a host where loadable
+# modules *are* available, so the Windows linkage can be exercised from macOS
+# and Linux CI without a Windows machine.
+option(KAGURA_FORCE_STATIC_PLUGIN
+       "Link the passes statically into kagura-opt even where loadable modules work" OFF)
+
+if(LLVM_ENABLE_PLUGINS AND NOT KAGURA_FORCE_STATIC_PLUGIN)
+  set(KAGURA_PLUGIN_STATIC OFF)
+  message(STATUS "[kagura] Plugin linkage: loadable module (-fpass-plugin)")
+else()
+  set(KAGURA_PLUGIN_STATIC ON)
+  message(STATUS "[kagura] Plugin linkage: static library (link into kagura-opt)")
+endif()
 # --------------------------------------------------------------------------
 
 # Passes (loaded as plugin via -fpass-plugin)
