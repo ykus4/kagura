@@ -33,7 +33,7 @@ namespace kagura {
 
 PreservedAnalyses BasicBlockReorderingPass::run(Function &F,
                                                 FunctionAnalysisManager &) {
-  if (!shouldObfuscate(F, "bbr", kagura::opt::BBR))
+  if (!shouldObfuscate(F, "bbr"))
     return PreservedAnalyses::all();
   if (F.isDeclaration() || F.size() < 3)
     return PreservedAnalyses::all();

@@ -35,9 +35,7 @@ using namespace llvm;
 namespace kagura {
 
 PreservedAnalyses TelemetryPass::run(Function &F, FunctionAnalysisManager &) {
-  if (!kagura::opt::Telemetry)
-    return PreservedAnalyses::all();
-  if (!shouldObfuscate(F, "telemetry", true))
+  if (!shouldObfuscate(F, "telemetry"))
     return PreservedAnalyses::all();
   if (F.isDeclaration())
     return PreservedAnalyses::all();

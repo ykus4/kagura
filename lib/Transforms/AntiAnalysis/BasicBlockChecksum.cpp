@@ -50,9 +50,7 @@ static uint32_t bbChecksum(const BasicBlock &BB) {
 
 PreservedAnalyses BasicBlockChecksumPass::run(Function &F,
                                                FunctionAnalysisManager &) {
-  if (!kagura::opt::BBCheck)
-    return PreservedAnalyses::all();
-  if (!shouldObfuscate(F, "bbcheck", true))
+  if (!shouldObfuscate(F, "bbcheck"))
     return PreservedAnalyses::all();
   if (F.isDeclaration())
     return PreservedAnalyses::all();

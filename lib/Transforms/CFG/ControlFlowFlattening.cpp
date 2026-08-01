@@ -168,7 +168,7 @@ ControlFlowFlatteningPass::run(Function &F, FunctionAnalysisManager &) {
   if (kagura::isWasmTarget(*F.getParent()))
     return PreservedAnalyses::all();
 
-  if (!shouldObfuscate(F, "fla", true))
+  if (!shouldObfuscate(F, "fla"))
     return PreservedAnalyses::all();
   auto &RNG    = getModulePRNG();
   bool Changed = flattenFunction(F, RNG);

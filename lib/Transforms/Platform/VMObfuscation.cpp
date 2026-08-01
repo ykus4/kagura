@@ -461,7 +461,7 @@ PreservedAnalyses VMObfuscationPass::run(Function &F,
   if (kagura::isWasmTarget(*F.getParent()))
     return PreservedAnalyses::all();
 
-  if (!shouldObfuscate(F, "vm", true)) return PreservedAnalyses::all();
+  if (!shouldObfuscate(F, "vm")) return PreservedAnalyses::all();
   if (!canVirtualize(F)) return PreservedAnalyses::all();
 
   auto &RNG = getModulePRNG();

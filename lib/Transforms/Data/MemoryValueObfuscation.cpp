@@ -81,9 +81,7 @@ static bool isFLADispatchAlloca(const AllocaInst *AI) {
 
 PreservedAnalyses MemoryValueObfuscationPass::run(Function &F,
                                                    FunctionAnalysisManager &) {
-  if (!kagura::opt::MVO)
-    return PreservedAnalyses::all();
-  if (!shouldObfuscate(F, "mvo", true))
+  if (!shouldObfuscate(F, "mvo"))
     return PreservedAnalyses::all();
   // EH functions are allowed: allocas in non-EH blocks are safe to transform.
   // The allocaEscapes() check already rejects any alloca whose address is

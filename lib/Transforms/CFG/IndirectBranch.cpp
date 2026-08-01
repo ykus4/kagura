@@ -187,7 +187,7 @@ static bool obfuscateFunction(Function &F, PRNG &RNG) {
 
 PreservedAnalyses IndirectBranchPass::run(Function &F,
                                            FunctionAnalysisManager &) {
-  if (!shouldObfuscate(F, "ibr", kagura::opt::IBR))
+  if (!shouldObfuscate(F, "ibr"))
     return PreservedAnalyses::all();
 
   auto &RNG    = getModulePRNG();

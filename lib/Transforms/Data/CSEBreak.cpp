@@ -145,7 +145,7 @@ static bool breakCSEInFunction(Function &F, PRNG & /*RNG*/) {
 }
 
 PreservedAnalyses CSEBreakPass::run(Function &F, FunctionAnalysisManager &) {
-  if (!shouldObfuscate(F, "cse-break", true))
+  if (!shouldObfuscate(F, "cse-break"))
     return PreservedAnalyses::all();
   if (F.isDeclaration())
     return PreservedAnalyses::all();

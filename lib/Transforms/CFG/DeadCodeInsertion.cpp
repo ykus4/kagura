@@ -62,7 +62,7 @@ static void fillJunkBody(IRBuilder<> &B, PRNG &RNG, unsigned NumOps) {
 
 PreservedAnalyses DeadCodeInsertionPass::run(Function &F,
                                              FunctionAnalysisManager &) {
-  if (!shouldObfuscate(F, "dci", kagura::opt::DCI))
+  if (!shouldObfuscate(F, "dci"))
     return PreservedAnalyses::all();
   if (F.isDeclaration() || F.size() < 2)
     return PreservedAnalyses::all();

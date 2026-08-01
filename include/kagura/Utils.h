@@ -23,11 +23,23 @@ void markObfuscated(llvm::Function &F, llvm::StringRef PassName);
 bool hasAnnotation(llvm::Function &F, llvm::StringRef Attr);
 
 /// Returns true if F should be obfuscated by the pass identified by PassAttr.
-/// Respects both module-level flags and per-function annotations:
+///
+/// Applies, in order: kagura's own symbols are never touched, sanitizer-built
+/// functions are skipped, then -kagura-protect / -kagura-deny / -kagura-allow
+/// and the per-function annotations:
 ///   annotate("kagura_<passAttr>")   -> force enable
 ///   annotate("kagura_no<passAttr>") -> force disable
+///
+/// GlobalFlag is what to return when nothing above decides, and defaults to
+/// true — "this pass is in the pipeline, so run unless told otherwise".
+///
+/// Do NOT pass a -kagura-* enable flag here. Whether a pass runs at all is
+/// decided when the pipeline is built (Plugin.cpp consults opt::Flag there);
+/// consulting it a second time inside the pass body made `opt -passes=kagura-X`
+/// silently do nothing for eleven passes, because that entry point never sets
+/// the flag.
 bool shouldObfuscate(llvm::Function &F, llvm::StringRef PassAttr,
-                     bool GlobalFlag);
+                     bool GlobalFlag = true);
 
 /// Returns true if Name is a symbol kagura itself generated.
 ///

@@ -176,7 +176,7 @@ static bool obfuscateFunction(Function &F, PRNG &RNG) {
 
 PreservedAnalyses ConstantObfuscationPass::run(Function &F,
                                                 FunctionAnalysisManager &) {
-  if (!shouldObfuscate(F, "co", true))
+  if (!shouldObfuscate(F, "co"))
     return PreservedAnalyses::all();
   auto &RNG    = getModulePRNG();
   bool Changed = obfuscateFunction(F, RNG);
