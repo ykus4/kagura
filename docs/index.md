@@ -1,5 +1,13 @@
 # Kagura
 
+> **LLVM 22 required for `-mllvm` flags.** On LLVM 17–21, clang parses `-mllvm`
+> options before `-fpass-plugin` has loaded the plugin, so every `-kagura-*`
+> flag is rejected with *"Unknown command line argument"*. Use the shipped
+> `kagura-opt`, or `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`, both
+> of which work on all supported versions. See
+> [Known issues](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md).
+
+
 > **LLVM-based code obfuscation and anti-tamper toolkit for mobile, desktop, and WebAssembly targets.**
 
 Built on the **New Pass Manager** (LLVM 17+). Loaded as a pass plugin via `-fpass-plugin` — no LLVM source tree modification required.

@@ -49,6 +49,34 @@ than having the profile preset silently overwrite it.
   `IRBuilder<>` carries a `ConstantFolder` that evaluated `(V ^ R) ^ R`
   straight back to `V` — so the pass stored the value that was already there.
   Now uses `IRBuilder<NoFolder>`.
+- **`-kagura-vm` produced binaries that hung before their first line of
+  output.** The interpreter was fine; the pass emitted bytecode that did not
+  mean anything. `virtualize()` handled binops, icmp, br, ret, load, store and
+  three casts — PHI nodes, calls, GEPs, allocas, selects and switches all fell
+  through to "emit NOP and carry on", and an operand it could not materialise
+  made it `continue` out of the middle of an instruction. `canVirtualize()`
+  accepted those functions regardless, so at `-O1` every function with a loop
+  became bytecode that computed nothing: the loop condition degenerated to a
+  literal 0 and the VM took the same edge forever.
+
+  Measured across the test subjects with inlining disabled, **all 16 cases
+  where the old pass virtualized anything hung, segfaulted or aborted**; the 10
+  that appeared to pass had virtualized nothing at all.
+
+  The pass is now all-or-nothing: any shape it cannot express leaves the
+  function untouched. PHIs lower to stack-based parallel copies, allocas to
+  arena offsets, calls through a relocation pool. Two further defects fixed
+  along the way — the bytecode blob was a *mutable* global decrypted in place,
+  so a second call to a virtualized function re-encrypted it; and the
+  trampoline kept the attributes inferred from the original body, advertising
+  `memory(none)` while calling the interpreter.
+
+  Verified: output identical to an unobfuscated build for every subject at
+  -O0/-O1/-O2, across three PRNG seeds, on LLVM 21 and 22 — and repeated calls
+  into the same virtualized function now return the same result.
+  `integration_vm_correctness` guards it, and was confirmed to fail against the
+  old code.
+
 - **`-kagura-lt` and `-kagura-fsplit` crashed clang.** Both emitted IR that
   fails LLVM's verifier: PHI nodes left ungrouped at the top of a block, and
   values erased while still in use (the freed slots were recycled, so
@@ -158,9 +186,19 @@ than having the profile preset silently overwrite it.
 
 ### Known issues
 
-- **`-kagura-vm` produces binaries that hang at startup.** Pre-existing; not
-  introduced by this release. `tests/integration/` is the only suite that runs
-  a binary and it never covered `vm`.
+- **`clang -fpass-plugin=… -mllvm -kagura-…` does not work below LLVM 22.**
+  Pre-existing, and it is the invocation the README leads with. clang parses
+  `-mllvm` options before `-fpass-plugin` has loaded the plugin, so the
+  `-kagura-*` options are not registered yet and clang exits with
+  *"Unknown command line argument '-kagura-str'"*. Verified failing on LLVM 21
+  with both this branch's plugin and `main`'s; accepted on 22.
+
+  Working on every supported version: the shipped `kagura-opt`, or
+  `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`. The test suite uses
+  the latter, which is why this went unnoticed — nothing exercised the
+  documented path. The docs now carry the caveat; picking a real fix (register
+  the options earlier, or make `kagura-opt` the documented entry point) is
+  still open.
 - **`-kagura-bbcheck` cannot detect binary patching.** Its checksum is
   computed over LLVM IR opcodes before code generation; the runtime has
   machine code and no way to recompute that value, and `block_id` restarts at
