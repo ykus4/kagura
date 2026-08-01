@@ -63,15 +63,6 @@ namespace kagura {
 // FNV-1a compile-time hash
 //===----------------------------------------------------------------------===//
 
-// FNV-1a 32-bit constants
-static constexpr uint32_t FNV1A_OFFSET_BASIS = 0x811c9dc5u;
-static constexpr uint32_t FNV1A_PRIME        = 0x01000193u;
-
-/// Feed a single byte into an FNV-1a running hash.
-static inline uint32_t fnv1a_byte(uint32_t hash, uint8_t byte) {
-  return (hash ^ byte) * FNV1A_PRIME;
-}
-
 /// Compute an FNV-1a hash over the sequence of instruction opcodes in F.
 ///
 /// We deliberately use opcodes rather than raw machine bytes because:
@@ -88,16 +79,16 @@ static inline uint32_t fnv1a_byte(uint32_t hash, uint8_t byte) {
 /// loaded bytes.  Matching is therefore a structural consistency check rather
 /// than a byte-exact comparison; see jailbreak_detection.c for the approach.
 static uint32_t computeOpcodeHash(const Function &F) {
-  uint32_t H = FNV1A_OFFSET_BASIS;
+  uint32_t H = fnv1a32Init();
   for (const BasicBlock &BB : F) {
     for (const Instruction &I : BB) {
       uint32_t OC = static_cast<uint32_t>(I.getOpcode());
       // Feed all four bytes of the opcode word in little-endian order so the
       // hash is portable across host endianness during compilation.
-      H = fnv1a_byte(H, static_cast<uint8_t>(OC & 0xFFu));
-      H = fnv1a_byte(H, static_cast<uint8_t>((OC >> 8) & 0xFFu));
-      H = fnv1a_byte(H, static_cast<uint8_t>((OC >> 16) & 0xFFu));
-      H = fnv1a_byte(H, static_cast<uint8_t>((OC >> 24) & 0xFFu));
+      H = fnv1a32Update(H, static_cast<uint8_t>(OC & 0xFFu));
+      H = fnv1a32Update(H, static_cast<uint8_t>((OC >> 8) & 0xFFu));
+      H = fnv1a32Update(H, static_cast<uint8_t>((OC >> 16) & 0xFFu));
+      H = fnv1a32Update(H, static_cast<uint8_t>((OC >> 24) & 0xFFu));
     }
   }
   return H;

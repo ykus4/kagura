@@ -153,7 +153,7 @@ static bool obfuscateMSVCTypeName(GlobalVariable *GV, Module &M, PRNG &RNG) {
     LB.CreateCondBr(Done, Exit, Loop);
 
     IRBuilder<>(Exit).CreateRetVoid();
-    appendToGlobalCtors(M, Ctor, 100);
+    appendKaguraCtor(M, Ctor, CtorPriority::RTTI);
     return true;
 }
 
@@ -214,7 +214,7 @@ static bool obfuscateRTTIName(GlobalVariable *GV, Module &M, PRNG &RNG) {
 
     IRBuilder<>(Exit).CreateRetVoid();
 
-    appendToGlobalCtors(M, Ctor, 100); // early priority
+    appendKaguraCtor(M, Ctor, CtorPriority::RTTI);
     return true;
 }
 

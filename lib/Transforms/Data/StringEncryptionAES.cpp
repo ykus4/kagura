@@ -59,16 +59,6 @@ static FunctionCallee getOrDeclareBlobIntegrity(Module &M) {
   return M.getOrInsertFunction("kagura_check_blob_integrity", FTy);
 }
 
-/// Compute FNV-1a-32 over a byte range at compile time.
-static uint32_t fnv1a32(const uint8_t *data, size_t len) {
-  uint32_t h = 0x811c9dc5u;
-  for (size_t i = 0; i < len; ++i) {
-    h ^= data[i];
-    h *= 0x01000193u;
-  }
-  return h;
-}
-
 // ---- AES decrypt runtime declaration -------------------------------------
 
 static FunctionCallee getOrDeclareRuntimeDecrypt(Module &M) {
@@ -143,24 +133,6 @@ static Value *emitAESDecryptCall(IRBuilder<> &B, Function *Stub,
   return B.CreateCall(Stub, {OutPtr}, "aesdec");
 }
 
-static bool hasOnlyGuardableUses(const GlobalVariable *GV) {
-  for (const User *U : GV->users()) {
-    if (isa<PHINode>(U))
-      return false;
-    if (isa<Instruction>(U))
-      continue;
-    if (isa<ConstantExpr>(U)) {
-      for (const User *Nested : U->users()) {
-        if (!isa<Instruction>(Nested) || isa<PHINode>(Nested))
-          return false;
-      }
-      continue;
-    }
-    return false;
-  }
-  return true;
-}
-
 //===----------------------------------------------------------------------===//
 // Pass entry point
 //===----------------------------------------------------------------------===//
@@ -200,7 +172,7 @@ PreservedAnalyses StringEncryptionAESPass::run(Module &M,
         aes::ctrCrypt(DataPtr, static_cast<size_t>(Len), Key, Nonce);
 
     // 4.2.13: Compute FNV-1a-32 checksum over the encrypted blob.
-    uint32_t BlobChecksum = fnv1a32(Encrypted.data(), Encrypted.size());
+    uint32_t BlobChecksum = fnv1a32(Encrypted);
 
     std::string Suffix = std::to_string(RNG.next32());
 

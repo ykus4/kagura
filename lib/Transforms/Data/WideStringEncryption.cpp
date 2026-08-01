@@ -281,7 +281,7 @@ static void buildCFStringDecryptCtor(
     B.CreateCall(DecFn);
   B.CreateRetVoid();
 
-  appendToGlobalCtors(M, Ctor, /*Priority=*/0);
+  appendKaguraCtor(M, Ctor, CtorPriority::RuntimeString);
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +296,7 @@ static void buildRuntimeStringDecryptCtor(
     Module &M,
     const SmallVector<Function *, 8> &Stubs,
     StringRef CtorName,
-    int Priority) {
+    CtorPriority Priority) {
   if (Stubs.empty())
     return;
   auto *Ctor = createCtorFunction(M, CtorName);
@@ -309,7 +309,7 @@ static void buildRuntimeStringDecryptCtor(
     B.CreateCall(Stub);
   B.CreateRetVoid();
 
-  appendToGlobalCtors(M, Ctor, Priority);
+  appendKaguraCtor(M, Ctor, Priority);
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +489,7 @@ PreservedAnalyses WideStringEncryptionPass::run(Module &M,
 
   buildRuntimeStringDecryptCtor(M, SwiftStubs,
                                  "kagura_swift_string_decrypt_ctor",
-                                 /*Priority=*/-1);
+                                 CtorPriority::SwiftString);
 
   // ---- Kotlin Native string constants (private [N x i8], kotlin patterns) --
 
@@ -530,7 +530,7 @@ PreservedAnalyses WideStringEncryptionPass::run(Module &M,
 
   buildRuntimeStringDecryptCtor(M, KotlinStubs,
                                  "kagura_kotlin_string_decrypt_ctor",
-                                 /*Priority=*/0);
+                                 CtorPriority::RuntimeString);
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

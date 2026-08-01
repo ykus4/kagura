@@ -38,15 +38,14 @@ using namespace llvm;
 
 namespace kagura {
 
-// FNV-1a over the opcode bytes of a basic block.
+// FNV-1a over the low opcode byte of every instruction in a basic block.
+// Deliberately narrower than AntiTamper's whole-function hash, which feeds all
+// four opcode bytes; the two are independent mechanisms.
 static uint32_t bbChecksum(const BasicBlock &BB) {
-  uint32_t h = 0x811c9dc5u;
-  for (const Instruction &I : BB) {
-    uint8_t op = static_cast<uint8_t>(I.getOpcode());
-    h ^= op;
-    h *= 0x01000193u;
-  }
-  return h;
+  uint32_t H = fnv1a32Init();
+  for (const Instruction &I : BB)
+    H = fnv1a32Update(H, static_cast<uint8_t>(I.getOpcode()));
+  return H;
 }
 
 PreservedAnalyses BasicBlockChecksumPass::run(Function &F,

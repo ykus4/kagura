@@ -156,7 +156,7 @@ PreservedAnalyses AntiDebugPass::run(Module &M, ModuleAnalysisManager &) {
 
   auto *Ctor = buildAntiDebugConstructor(M, AntiFramework, AntiPtrace);
   // Register as module constructor (priority 0 = runs first)
-  appendToGlobalCtors(M, Ctor, 0);
+  appendKaguraCtor(M, Ctor, CtorPriority::AntiDebug);
   return PreservedAnalyses::none();
 }
 
