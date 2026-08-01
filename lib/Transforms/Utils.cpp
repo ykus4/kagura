@@ -24,6 +24,15 @@ namespace kagura {
 // ---- Annotation helpers ----
 
 bool hasAnnotation(Function &F, StringRef Attr) {
+  // Function metadata, written by AutoSelectPass. Checked first because it is
+  // far cheaper than walking llvm.global.annotations, and because AutoSelect
+  // runs before every pass that queries this.
+  //
+  // AutoSelect used to write this metadata while nothing ever read it, which
+  // made the entire pass a no-op.
+  if (F.hasMetadata(Attr))
+    return true;
+
   Module *M = F.getParent();
   GlobalVariable *GA =
       M->getGlobalVariable("llvm.global.annotations");

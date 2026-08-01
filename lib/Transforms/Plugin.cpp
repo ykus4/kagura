@@ -143,6 +143,14 @@ llvm::PassPluginLibraryInfo getKaguraPluginInfo() {
                   if (opt::Metrics)
                     MPM.addPass(ObfuscationMetricsPass(/*Before=*/true));
 
+                  // --- Per-function pass selection by risk score ---
+                  // Must precede every obfuscation pass: it works by writing
+                  // per-function annotations that those passes then read.
+                  // This injection was missing entirely, so -kagura-autoselect
+                  // did nothing at all through -fpass-plugin.
+                  if (opt::AutoSelect)
+                    MPM.addPass(AutoSelectPass());
+
                   // --- Module-level passes (table-driven) ---
 #define KAGURA_MOD_PASS(Flag, Cli, Desc, Ctor)                                 \
                   if (opt::Flag)                                               \

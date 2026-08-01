@@ -32,6 +32,8 @@
 #include "kagura/Passes.h"
 #include "kagura/Utils.h"
 
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -104,6 +106,17 @@ static RiskFeatures analyze(const Function &F) {
   return R;
 }
 
+/// The per-function passes AutoSelect arbitrates, paired with whether the user
+/// enabled them. Only these are annotated; anything else is left untouched.
+static SmallVector<std::pair<StringRef, bool>, 8> candidatePasses() {
+  return {
+      {"str", kagura::opt::STR}, {"bbr", kagura::opt::BBR},
+      {"bcf", kagura::opt::BCF}, {"bbs", kagura::opt::BBS},
+      {"mvo", kagura::opt::MVO}, {"fla", kagura::opt::FLA},
+      {"sub", kagura::opt::SUB}, {"pe",  kagura::opt::PE},
+  };
+}
+
 enum class ProtectionTier { Low, Medium, High };
 
 static ProtectionTier tierFor(unsigned Score) {
@@ -112,18 +125,19 @@ static ProtectionTier tierFor(unsigned Score) {
   return ProtectionTier::High;
 }
 
-/// Annotate F with the kagura attribute for PassAttr if it isn't already
-/// explicitly annotated (neither force-enable nor force-disable).
-static void annotateIfAbsent(Function &F, StringRef PassAttr) {
-  // Check for existing kagura_<pass> or kagura_no<pass> annotations
+/// Attach `kagura_<attr>` (force-enable) or `kagura_no<attr>` (force-disable)
+/// to F as function metadata, unless the user already annotated it either way.
+/// A user annotation always wins over an automatic decision.
+static void annotateIfAbsent(Function &F, StringRef PassAttr, bool Enable) {
   if (kagura::hasAnnotation(F, ("kagura_" + PassAttr).str()))   return;
   if (kagura::hasAnnotation(F, ("kagura_no" + PassAttr).str())) return;
 
-  // Add the annotation via function-level metadata
   LLVMContext &Ctx = F.getContext();
   MDNode *Node = MDNode::get(Ctx, MDString::get(Ctx,
       ("kagura.autoselect." + PassAttr).str()));
-  F.setMetadata(("kagura_" + PassAttr).str(), Node);
+  std::string Key = Enable ? ("kagura_" + PassAttr).str()
+                           : ("kagura_no" + PassAttr).str();
+  F.setMetadata(Key, Node);
 }
 
 } // anonymous namespace
@@ -156,41 +170,52 @@ PreservedAnalyses AutoSelectPass::run(Module &M, ModuleAnalysisManager &) {
                << " insts=" << Features.Insts
                << "\n");
 
-    // Always enable string encryption if the function references strings
-    if (Features.HasStrings && kagura::opt::STR)
-      annotateIfAbsent(F, "str");
+    // Which of the globally-enabled passes this function's risk score
+    // warrants. AutoSelect can only ever narrow: a pass the user did not
+    // enable is not in the pipeline at all, so annotating it would achieve
+    // nothing, and turning on protection the user did not ask for would be a
+    // surprising thing for an "auto" mode to do.
+    StringSet<> Want;
+    if (Features.HasStrings)
+      Want.insert("str");
 
     switch (Tier) {
     case ProtectionTier::Low:
       // Lightweight: BBR only (+ STR above)
-      if (kagura::opt::BBR) annotateIfAbsent(F, "bbr");
+      Want.insert("bbr");
       break;
 
     case ProtectionTier::Medium:
       // Moderate: BCF + BBR + BBS + MVO
-      if (kagura::opt::BCF) annotateIfAbsent(F, "bcf");
-      if (kagura::opt::BBR) annotateIfAbsent(F, "bbr");
-      if (kagura::opt::BBS) annotateIfAbsent(F, "bbs");
-      if (kagura::opt::MVO && Features.IntAllocas > 0)
-        annotateIfAbsent(F, "mvo");
+      Want.insert("bcf");
+      Want.insert("bbr");
+      Want.insert("bbs");
+      if (Features.IntAllocas > 0) Want.insert("mvo");
       break;
 
     case ProtectionTier::High:
-      // Heavy: FLA + BCF + BBR + BBS + MVO + PE + SUB
-      // Skip FLA and VM for very large functions (> 200 instructions)
-      // to avoid excessive code size blowup.
-      // Skip FLA on Wasm (structured control flow requirement).
-      if (kagura::opt::FLA && Features.Insts <= 200 && !IsWasm)
-        annotateIfAbsent(F, "fla");
-      if (kagura::opt::BCF) annotateIfAbsent(F, "bcf");
-      if (kagura::opt::BBR) annotateIfAbsent(F, "bbr");
-      if (kagura::opt::BBS) annotateIfAbsent(F, "bbs");
-      if (kagura::opt::SUB) annotateIfAbsent(F, "sub");
-      if (kagura::opt::MVO && Features.IntAllocas > 0)
-        annotateIfAbsent(F, "mvo");
-      if (kagura::opt::PE && Features.PtrAllocas > 0)
-        annotateIfAbsent(F, "pe");
+      // Heavy: FLA + BCF + BBR + BBS + MVO + PE + SUB.
+      // FLA is skipped for very large functions to bound code-size blowup,
+      // and on Wasm, which requires structured control flow.
+      if (Features.Insts <= 200 && !IsWasm) Want.insert("fla");
+      Want.insert("bcf");
+      Want.insert("bbr");
+      Want.insert("bbs");
+      Want.insert("sub");
+      if (Features.IntAllocas > 0) Want.insert("mvo");
+      if (Features.PtrAllocas > 0) Want.insert("pe");
       break;
+    }
+
+    // Emit an explicit decision for every candidate pass the user enabled.
+    // The force-disable half is what actually does the work: with the pass
+    // already in the pipeline, a force-enable annotation only restates the
+    // default, so annotating solely the wanted set — as this pass used to —
+    // would leave behaviour unchanged even once the annotations were read.
+    for (auto &[Attr, Enabled] : candidatePasses()) {
+      if (!Enabled)
+        continue;
+      annotateIfAbsent(F, Attr, Want.contains(Attr));
     }
   }
 
