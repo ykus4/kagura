@@ -7,10 +7,6 @@
 # Pinned so a new upstream release cannot break `mkdocs build --strict` in CI
 # without a deliberate commit here. Versions below match the working local
 # .venv-docs at the time of writing.
-#
-# NOTE: .github/workflows/docs.yml still runs
-#   pip install mkdocs-material pymdown-extensions mkdocs-static-i18n
-# unpinned. It should be changed to `pip install -r docs/requirements.txt`.
 
 mkdocs==1.6.1
 mkdocs-material==9.7.6
