@@ -7,6 +7,8 @@ set(KAGURA_RUNTIME_CORE_SOURCES
   core/bb_check.c
   core/telemetry.c
   core/random.c
+  core/tamper_response.c
+  core/soft_response.c
 )
 
 add_library(kagura_runtime STATIC ${KAGURA_RUNTIME_CORE_SOURCES})
@@ -26,7 +28,6 @@ if(NOT WIN32)
     anti_debug/loaded_library_scan.c
     anti_debug/symbol_interposition.c
     anti_debug/anti_dump.c
-    anti_debug/soft_response.c
 
     # ---- Android + Linux: integrity, attestation, syscall / proc hardening ---
     android/android_root_advanced.c
@@ -69,7 +70,6 @@ if(WIN32)
   target_sources(kagura_runtime PRIVATE
     windows/anti_debug.c
     windows/integrity.c
-    windows/tamper_response.c
     windows/device_key.c
     windows/etw_detection.c
   )

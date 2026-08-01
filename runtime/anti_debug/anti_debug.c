@@ -8,15 +8,12 @@
  * Targets: iOS (Darwin) and Android (Linux)
  */
 
-#include <stdint.h>
+#include "../internal.h"
+
 #include <stdlib.h>
 #include <string.h>
 
-// ---- Default tamper response ----
-
-__attribute__((weak)) void kagura_on_tamper_detected(void) {
-    abort();
-}
+// The tamper response hook lives in core/tamper_response.c.
 
 // ---- TracerPid check (Android / Linux) ----
 
