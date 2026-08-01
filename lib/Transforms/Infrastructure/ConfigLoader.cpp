@@ -56,7 +56,9 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <algorithm>
 #include <cstdlib>
+#include <string>
 
 using namespace llvm;
 
@@ -132,39 +134,30 @@ static void applyProfile(StringRef Profile) {
 
 // ---- JSON policy loader ----------------------------------------------------
 
+/// Map a registry CLI name to its JSON policy key: "kagura-str-aes" ->
+/// "str_aes". Deriving the key means the policy schema cannot drift from the
+/// pass list.
+static std::string jsonKeyFor(StringRef Cli) {
+  std::string Key = Cli.drop_front(StringRef("kagura-").size()).str();
+  std::replace(Key.begin(), Key.end(), '-', '_');
+  return Key;
+}
+
 static void applyPassesObject(const json::Object &Passes) {
-  auto getBool = [&](StringRef Key, cl::opt<bool> &Flag) {
+  auto getBool = [&](StringRef Cli, cl::opt<bool> &Flag) {
     if (setByUser(Flag))
       return;
-    if (auto V = Passes.getBoolean(Key))
+    if (auto V = Passes.getBoolean(jsonKeyFor(Cli)))
       Flag = *V;
   };
-  getBool("fla",    opt::FLA);
-  getBool("bcf",    opt::BCF);
-  getBool("sub",    opt::SUB);
-  getBool("str",    opt::STR);
-  getBool("str_aes",opt::STRAES);
-  getBool("wstr",   opt::WSTR);
-  getBool("co",     opt::CO);
-  getBool("vm",     opt::VM);
-  getBool("ibr",    opt::IBR);
-  getBool("lt",     opt::LT);
-  getBool("bbr",    opt::BBR);
-  getBool("dci",    opt::DCI);
-  getBool("bbs",    opt::BBS);
-  getBool("fsplit", opt::FSplit);
-  getBool("sv",     opt::SV);
-  getBool("genc",   opt::GENC);
-  getBool("mvo",    opt::MVO);
-  getBool("honey",  opt::Honey);
-  getBool("tamper", opt::Tamper);
-  getBool("pac",    opt::PAC);
-  getBool("ci",     opt::CI);
-  getBool("anti_debug", opt::AntiDebug);
-  getBool("objc",   opt::ObjC);
-  getBool("jni",    opt::JNI);
-  getBool("pe",     opt::PE);
-  getBool("telemetry", opt::Telemetry);
+
+  // Generated from the registry rather than written out by hand. The hand
+  // written table this replaces had already lost cse_break, string_split,
+  // bbcheck and elt — those keys were simply ignored in policy files, with no
+  // diagnostic.
+#define KAGURA_FN_PASS(Flag, Cli, Desc, Ctor)  getBool(Cli, opt::Flag);
+#define KAGURA_MOD_PASS(Flag, Cli, Desc, Ctor) getBool(Cli, opt::Flag);
+#include "../PassRegistry.def"
 
   if (!setByUser(opt::DWARFMode))
     if (auto DwarfVal = Passes.getString("dwarf"))
