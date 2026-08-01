@@ -66,38 +66,47 @@ public class YourGameTarget : TargetRules
 
 ## Configuration
 
-Edit `KaguraConfig` in `KaguraToolchain.cs`, or point to a JSON config file:
+By default the toolchain emits a single obfuscation flag,
+`-mllvm -kagura-config=<kagura>/integration/profiles/<profile>.json`. The pass
+set for each profile lives in [`integration/profiles`](../profiles/README.md),
+the single source of truth shared by every kagura integration.
+
+Environment variables (no code edit needed):
+
+| Variable | Default | Description |
+|---|---|---|
+| `KAGURA_ROOT` | `<UE root>/../kagura` | kagura checkout; the plugin, runtime and profiles are found from here |
+| `KAGURA_PLUGIN_PATH` | auto | Absolute path to `KaguraObfuscator.{dylib,so,dll}`; skips the probe |
+| `KAGURA_RUNTIME_LIB` | auto | Absolute path to `libkagura_runtime.a` |
+| `KAGURA_PROFILE` | `balanced` | `fast` / `balanced` / `strong` / `off`, or a path to your own JSON policy file |
+
+For a project-specific policy, point `KAGURA_PROFILE` at your own file:
+
+```json
+{ "profile": "STRONG", "passes": { "vm": true } }
+```
+
+### Explicit-flag fallback
+
+Set `KaguraConfig.UseProfile = false` in `KaguraToolchain.cs` to bypass the
+profile and use the explicit `EnableStr` / `EnableFla` / … fields instead.
+This is also the automatic fallback if the profile file cannot be found.
+Prefer the profile: keeping a second, independent pass list here is exactly
+how the six integration copies drifted apart.
 
 ```csharp
 public static class KaguraConfig
 {
-    public static string ConfigFile    = "";        // path to kagura.json (optional)
-    public static string Profile       = "BALANCED"; // FAST | BALANCED | STRONG
+    public static bool   UseProfile    = true;   // false => use the fields below
     public static bool   EnableStr     = true;
-    public static bool   EnableWstr    = true;
     public static bool   EnableFla     = true;
     public static bool   EnableBcf     = true;
     public static bool   EnableSub     = true;
-    public static bool   EnableGenc    = false;
-    public static bool   EnableMvo     = false;
-    public static bool   EnableHoney   = false;
-    public static bool   EnableTamper  = true;
-    public static bool   EnableSymMap  = false;
     public static bool   ShippingOnly  = true;   // only apply for Shipping builds
     public static int    BcfProb       = 30;
-    public static int    BcfIter       = 1;
     // ... see file for full list
 }
 ```
-
-JSON config (recommended for team projects):
-
-```json
-{ "profile": "STRONG" }
-```
-
-Point to the config file via `KAGURA_CONFIG_PATH` environment variable or
-by setting `KaguraConfig.ConfigFile` before build start.
 
 ## Game Value Protection
 

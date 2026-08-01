@@ -17,34 +17,42 @@
 #   include("/path/to/kagura/integration/unity/kagura_unity_config.cmake")
 #
 # ── Required variables ────────────────────────────────────────────────────────
-#   KAGURA_PLUGIN_PATH   Path to KaguraObfuscator.dylib / .so
+#   KAGURA_PLUGIN_PATH   Path to KaguraObfuscator.dylib / .so / .dll
+#                        (auto-discovered if unset)
 #   KAGURA_RUNTIME_LIB   Path to libkagura_runtime.a
 #
-# ── Optional variables (all default to ON) ────────────────────────────────────
-#   KAGURA_ENABLE_STR         String encryption
-#   KAGURA_ENABLE_FLA         CFG flattening
-#   KAGURA_ENABLE_BCF         Bogus control flow
-#   KAGURA_ENABLE_SUB         Instruction substitution
-#   KAGURA_ENABLE_IBR         Indirect branch
-#   KAGURA_ENABLE_BBR         BB reordering
-#   KAGURA_ENABLE_SV          Symbol visibility
-#   KAGURA_ENABLE_ANTI_DEBUG  Anti-debug
-#   KAGURA_ENABLE_TAMPER      Anti-tamper
-#   KAGURA_BCF_PROB           Bogus CF probability [0-100] (default: 30)
-#   KAGURA_SEED               PRNG seed (default: 0 = entropy)
+# ── Optional variables ────────────────────────────────────────────────────────
+#   KAGURA_PROFILE            FAST | BALANCED | STRONG, or a path to your own
+#                             JSON policy file (default: BALANCED)
+#   KAGURA_EXTRA_PASSES       Extra "-kagura-*" flags appended after the profile
+#
+#   Per-pass overrides — no defaults, so an unset one means "the profile
+#   decides". Setting one appends it after the profile and drops
+#   -kagura-config so the kagura-config pass cannot clobber it:
+#     KAGURA_ENABLE_STR / _FLA / _BCF / _SUB / _CO / _IBR / _BBR / _BBS /
+#     _DCI / _SV / _ANTI_DEBUG / _TAMPER / _GENC / _VM
+#     KAGURA_BCF_PROB, KAGURA_SEED
+#
+# The pass set for each profile is NOT defined here. It comes from
+# integration/profiles/<profile>.json via integration/cmake/KaguraProfile.cmake,
+# the single source of truth shared by every kagura integration.
 # ─────────────────────────────────────────────────────────────────────────────
 
 cmake_minimum_required(VERSION 3.20)
 
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/KaguraProfile.cmake")
+
 # ── Locate plugin if not set ──────────────────────────────────────────────────
-if(NOT KAGURA_PLUGIN_PATH)
-  find_file(KAGURA_PLUGIN_PATH
-    NAMES KaguraObfuscator.dylib KaguraObfuscator.so
-    HINTS
-      "${CMAKE_CURRENT_LIST_DIR}/../../build/lib/Transforms"
-      "${CMAKE_SOURCE_DIR}/../kagura/build/lib/Transforms"
-    DOC "Path to KaguraObfuscator plugin"
-  )
+# Probes .dylib / .so / .dll: IL2CPP cross-builds run the plugin in the host
+# clang, so the host's library extension is what matters.
+kagura_find_plugin(_KAGURA_FOUND_PLUGIN
+  HINTS
+    "${CMAKE_CURRENT_LIST_DIR}/../../build/lib/Transforms"
+    "${CMAKE_SOURCE_DIR}/../kagura/build/lib/Transforms"
+)
+if(_KAGURA_FOUND_PLUGIN)
+  set(KAGURA_PLUGIN_PATH "${_KAGURA_FOUND_PLUGIN}"
+      CACHE FILEPATH "Path to KaguraObfuscator plugin" FORCE)
 endif()
 
 if(NOT KAGURA_PLUGIN_PATH OR NOT EXISTS "${KAGURA_PLUGIN_PATH}")
@@ -64,55 +72,57 @@ if(NOT KAGURA_RUNTIME_LIB)
   )
 endif()
 
-# ── Default pass settings ─────────────────────────────────────────────────────
-option(KAGURA_ENABLE_STR        "kagura: string encryption"     ON)
-option(KAGURA_ENABLE_FLA        "kagura: CFG flattening"        ON)
-option(KAGURA_ENABLE_BCF        "kagura: bogus control flow"    ON)
-option(KAGURA_ENABLE_SUB        "kagura: substitution"          ON)
-option(KAGURA_ENABLE_IBR        "kagura: indirect branch"       ON)
-option(KAGURA_ENABLE_BBR        "kagura: BB reordering"         ON)
-option(KAGURA_ENABLE_BBS        "kagura: BB splitting"          OFF)
-option(KAGURA_ENABLE_DCI        "kagura: dead code insertion"   OFF)
-option(KAGURA_ENABLE_SV         "kagura: symbol visibility"     ON)
-option(KAGURA_ENABLE_ANTI_DEBUG "kagura: anti-debug"            ON)
-option(KAGURA_ENABLE_TAMPER     "kagura: anti-tamper"           ON)
-option(KAGURA_ENABLE_GENC       "kagura: global encryption"     OFF)
-option(KAGURA_ENABLE_VM         "kagura: VM obfuscation"        OFF)
-option(KAGURA_ENABLE_CO         "kagura: constant obfuscation"  OFF)
+# ── Profile + overrides ───────────────────────────────────────────────────────
+# No option()/set() defaults for the per-pass switches: a default would
+# silently override the profile for every Unity project.
 
-set(KAGURA_BCF_PROB "30" CACHE STRING "kagura: bogus CF probability [0-100]")
-set(KAGURA_SEED     "0"  CACHE STRING "kagura: PRNG seed (0 = entropy)")
+if(NOT DEFINED KAGURA_PROFILE)
+  set(KAGURA_PROFILE "BALANCED" CACHE STRING
+      "kagura: FAST | BALANCED | STRONG, or a path to a JSON policy file")
+endif()
+
+set(_KAGURA_OVERRIDES "")
+if(KAGURA_EXTRA_PASSES)
+  list(APPEND _KAGURA_OVERRIDES ${KAGURA_EXTRA_PASSES})
+endif()
+foreach(_pair
+    "KAGURA_ENABLE_STR;-kagura-str"
+    "KAGURA_ENABLE_FLA;-kagura-fla"
+    "KAGURA_ENABLE_BCF;-kagura-bcf"
+    "KAGURA_ENABLE_SUB;-kagura-sub"
+    "KAGURA_ENABLE_CO;-kagura-co"
+    "KAGURA_ENABLE_IBR;-kagura-ibr"
+    "KAGURA_ENABLE_BBR;-kagura-bbr"
+    "KAGURA_ENABLE_BBS;-kagura-bbs"
+    "KAGURA_ENABLE_DCI;-kagura-dci"
+    "KAGURA_ENABLE_SV;-kagura-sv"
+    "KAGURA_ENABLE_ANTI_DEBUG;-kagura-anti-debug"
+    "KAGURA_ENABLE_TAMPER;-kagura-tamper"
+    "KAGURA_ENABLE_GENC;-kagura-genc"
+    "KAGURA_ENABLE_VM;-kagura-vm")
+  list(GET _pair 0 _var)
+  list(GET _pair 1 _flag)
+  if(DEFINED ${_var})
+    if(${_var})
+      list(APPEND _KAGURA_OVERRIDES "${_flag}")
+    endif()
+  endif()
+endforeach()
+if(DEFINED KAGURA_BCF_PROB)
+  list(APPEND _KAGURA_OVERRIDES "-kagura-bcf-prob=${KAGURA_BCF_PROB}")
+endif()
+if(DEFINED KAGURA_SEED)
+  list(APPEND _KAGURA_OVERRIDES "-kagura-seed=${KAGURA_SEED}")
+endif()
+
+kagura_profile_flags("${KAGURA_PROFILE}" _KAGURA_PASS_FLAGS
+                     OVERRIDES ${_KAGURA_OVERRIDES})
 
 # ── Build flag string ─────────────────────────────────────────────────────────
 set(_KAGURA_FLAGS "-fpass-plugin=${KAGURA_PLUGIN_PATH}")
-
-macro(_kagura_add_flag _enabled _flag)
-  if(${_enabled})
-    string(APPEND _KAGURA_FLAGS " -mllvm ${_flag}")
-  endif()
-endmacro()
-
-_kagura_add_flag(KAGURA_ENABLE_STR        "-kagura-str")
-_kagura_add_flag(KAGURA_ENABLE_FLA        "-kagura-fla")
-_kagura_add_flag(KAGURA_ENABLE_BCF        "-kagura-bcf")
-_kagura_add_flag(KAGURA_ENABLE_SUB        "-kagura-sub")
-_kagura_add_flag(KAGURA_ENABLE_CO         "-kagura-co")
-_kagura_add_flag(KAGURA_ENABLE_IBR        "-kagura-ibr")
-_kagura_add_flag(KAGURA_ENABLE_BBR        "-kagura-bbr")
-_kagura_add_flag(KAGURA_ENABLE_BBS        "-kagura-bbs")
-_kagura_add_flag(KAGURA_ENABLE_DCI        "-kagura-dci")
-_kagura_add_flag(KAGURA_ENABLE_SV         "-kagura-sv")
-_kagura_add_flag(KAGURA_ENABLE_ANTI_DEBUG "-kagura-anti-debug")
-_kagura_add_flag(KAGURA_ENABLE_TAMPER     "-kagura-tamper")
-_kagura_add_flag(KAGURA_ENABLE_GENC       "-kagura-genc")
-_kagura_add_flag(KAGURA_ENABLE_VM         "-kagura-vm")
-
-if(KAGURA_ENABLE_BCF AND NOT KAGURA_BCF_PROB STREQUAL "30")
-  string(APPEND _KAGURA_FLAGS " -mllvm -kagura-bcf-prob=${KAGURA_BCF_PROB}")
-endif()
-if(NOT KAGURA_SEED STREQUAL "0")
-  string(APPEND _KAGURA_FLAGS " -mllvm -kagura-seed=${KAGURA_SEED}")
-endif()
+foreach(_flag IN LISTS _KAGURA_PASS_FLAGS)
+  string(APPEND _KAGURA_FLAGS " -mllvm ${_flag}")
+endforeach()
 
 # ── Inject into global compile options ────────────────────────────────────────
 # These apply to every target defined after this include().
@@ -139,6 +149,7 @@ else()
 endif()
 
 message(STATUS "[kagura] Unity IL2CPP obfuscation enabled")
+message(STATUS "[kagura]   Profile: ${KAGURA_PROFILE}")
 message(STATUS "[kagura]   Plugin : ${KAGURA_PLUGIN_PATH}")
 message(STATUS "[kagura]   Runtime: ${KAGURA_RUNTIME_LIB}")
 message(STATUS "[kagura]   Flags  : ${_KAGURA_FLAGS}")
