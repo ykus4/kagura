@@ -2,12 +2,24 @@
 //
 // 4.6.12: Swift Package Manager support for KaguraRuntime.
 //
-// This package exposes the kagura runtime C library as a Swift/C target so
-// that Swift and mixed Swift+ObjC projects can link it without CocoaPods or
-// manual xcconfig wiring.
+// ┌──────────────────────────────────────────────────────────────────────────┐
+// │ IMPORTANT — this manifest must be evaluated from the REPOSITORY ROOT.    │
+// │                                                                          │
+// │ SwiftPM refuses any target whose `path` escapes the package root         │
+// │ ("target 'X' in package 'Y' is outside the package root"), so a          │
+// │ Package.swift living in integration/swiftpm/ physically cannot reach     │
+// │ ../../runtime. The paths below are therefore written relative to the     │
+// │ repository root, which is also what the documented consumer usage        │
+// │   .package(url: "https://github.com/ykus4/kagura.git", from: "0.2.1")    │
+// │ requires — SwiftPM only ever looks for Package.swift at the root of a    │
+// │ checked-out repository.                                                  │
+// │                                                                          │
+// │ Symlink or copy this file to the repository root before use:             │
+// │   ln -s integration/swiftpm/Package.swift Package.swift                  │
+// └──────────────────────────────────────────────────────────────────────────┘
 //
-// Usage in Package.swift:
-//   .package(url: "https://github.com/ykus4/kagura.git", from: "0.1.0")
+// Usage in a consumer Package.swift:
+//   .package(url: "https://github.com/ykus4/kagura.git", from: "0.2.1")
 //
 // Then add to your target:
 //   .target(
@@ -17,14 +29,20 @@
 //       ]
 //   )
 //
-// The LLVM pass plugin (libKaguraObfuscator.dylib) must still be loaded via
-// the Xcode build system (OTHER_SWIFT_FLAGS / OTHER_CFLAGS) since SPM does
-// not have first-class support for compiler plugins of this type.  See
-// integration/xcode/README.md for instructions.
+// The LLVM pass plugin (KaguraObfuscator.dylib) must still be loaded via the
+// Xcode build system (OTHER_SWIFT_FLAGS / OTHER_CFLAGS) since SPM does not
+// have first-class support for compiler plugins of this type. See
+// integration/xcode/README.md for instructions, and
+// integration/profiles/*.json for the shared obfuscation profiles.
 //
-// Note: Android JNI sources are excluded at the source level via conditional
-// compilation (#ifdef __ANDROID__); they compile to empty translation units
-// on Apple platforms and are harmless to include.
+// Source selection is DIRECTORY-level on purpose: runtime/ is reorganised
+// from time to time and naming individual .c files here has broken this
+// manifest before. A file added to runtime/core, runtime/anti_debug,
+// runtime/ios or runtime/game is picked up automatically.
+//
+// runtime/android/ and runtime/windows/ are intentionally NOT listed: they
+// are platform-specific implementations (Bionic/Linux syscalls, Win32) and
+// must never be compiled into an Apple target.
 
 import PackageDescription
 
@@ -47,68 +65,21 @@ let package = Package(
             name: "KaguraRuntime",
             path: ".",
             sources: [
-                // --- Core crypto / shared utilities ---
-                "runtime/aes.c",
-                "runtime/zero_buf.c",
-                "runtime/device_key.c",
-                "runtime/blob_integrity.c",
-
-                // --- Anti-debug / anti-analysis (cross-platform) ---
-                "runtime/anti_debug.c",
-                "runtime/breakpoint_detection.c",
-                "runtime/hook_detection.c",
-                "runtime/emulator_detection.c",
-                "runtime/loaded_library_scan.c",
-                "runtime/symbol_interposition.c",
-                "runtime/anti_dump.c",
-                "runtime/soft_response.c",
-
-                // --- iOS / macOS integrity & jailbreak detection ---
-                "runtime/jailbreak_detection.c",
-                "runtime/ios_integrity.c",
-                "runtime/ios_jailbreak_advanced.c",
-                "runtime/ios_platform.c",
-                "runtime/macho_integrity.c",
-                "runtime/fishhook_countermeasure.c",
-                "runtime/testflight_detect.c",
-                "runtime/swift_protection.c",
-                "runtime/objc_name_remap.c",
-
-                // --- Anti-cheat / game integrity ---
-                "runtime/il2cpp_protection.c",
-                "runtime/game_values.c",
-                "runtime/state_integrity.c",
-                "runtime/behavior_log.c",
-                "runtime/integrity_report.c",
-
-                // --- Crash symbolication ---
-                "runtime/crash_symbolication.c",
-
-                // --- VM interpreter ---
-                "runtime/vm_interpreter.c",
-
-                // --- Android / Linux files below compile to empty TUs on Apple ---
-                // (guarded internally with #ifdef __ANDROID__ / #ifdef __linux__)
-                "runtime/direct_syscall.c",
-                "runtime/proc_inspection.c",
-                "runtime/seccomp_checks.c",
-                "runtime/android_root_advanced.c",
-                "runtime/jni_hook_detection.c",
-                "runtime/play_integrity.c",
-                "runtime/safetynet_compat.c",
-                "runtime/art_environment.c",
-                "runtime/load_order.c",
-                "runtime/apk_integrity.c",
-                "runtime/elf_integrity.c",
-                "runtime/split_apk.c",
+                "runtime/core",       // AES, zero_buf, device key, VM interpreter, …
+                "runtime/anti_debug", // ptrace/Frida/breakpoint/hook detection
+                "runtime/ios",        // jailbreak detection, Mach-O integrity, ObjC
+                "runtime/game",       // anti-cheat helpers (IL2CPP, UE4, value guards)
             ],
-            publicHeadersPath: "include",
+            // NOT include/ — include/kagura/{Options,Passes,Utils,VM}.h are LLVM
+            // C++ plugin headers and game_protect.h is a C++ template header;
+            // exposing them as the public headers of a C target produces a
+            // Clang module that Swift consumers cannot build.
+            publicHeadersPath: "integration/swiftpm/include",
             cSettings: [
-                .headerSearchPath("include"),
                 .define("KAGURA_SWIFTPM"),
             ],
             linkerSettings: [
-                // Required for dlopen/dladdr (crash symbolication, anti-debug)
+                // dlopen/dladdr (crash symbolication, anti-debug)
                 .linkedLibrary("dl", .when(platforms: [.macOS, .linux])),
             ]
         ),
