@@ -4,6 +4,9 @@ set(KAGURA_RUNTIME_CORE_SOURCES
   core/aes.c
   core/zero_buf.c
   core/vm_interpreter.c
+  core/bb_check.c
+  core/telemetry.c
+  core/random.c
 )
 
 add_library(kagura_runtime STATIC ${KAGURA_RUNTIME_CORE_SOURCES})

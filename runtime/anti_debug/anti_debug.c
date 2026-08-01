@@ -87,6 +87,43 @@ int kagura_check_frida_port(void) {
 
 #endif // __linux__
 
+// ---- TracerPid check: non-Linux implementations ----
+//
+// AntiDebug.cpp emits an unconditional call to kagura_check_tracer_pid on
+// every target, so the symbol must always exist.  Without this block the
+// -kagura-anti-debug pass could not link anywhere except Linux.
+
+#if !defined(__linux__)
+#if defined(__APPLE__)
+
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+// Darwin has no /proc.  The canonical equivalent is the P_TRACED flag in the
+// kinfo_proc record returned by sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID).
+int kagura_check_tracer_pid(void) {
+    struct kinfo_proc info;
+    size_t size = sizeof(info);
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+
+    memset(&info, 0, sizeof(info));
+    if (sysctl(mib, 4, &info, &size, NULL, 0) != 0)
+        return 0; // query failed — assume clean rather than false-positive
+    return (info.kp_proc.p_flag & P_TRACED) != 0 ? 1 : 0;
+}
+
+#else // neither Linux nor Apple
+
+// Portable fallback so the symbol always resolves.  Windows has its own,
+// much better checks in runtime/windows/anti_debug.c.
+int kagura_check_tracer_pid(void) {
+    return 0;
+}
+
+#endif
+#endif // !__linux__
+
 // ---- iOS / macOS checks ----
 
 #ifdef __APPLE__
