@@ -96,14 +96,14 @@ int kagura_check_inline_hooks(void) {
 #include <stdlib.h>
 
 /* Callback data for the GOT scan */
-struct _kagura_got_scan_ctx {
+struct got_scan_ctx {
     int found_hook;
 };
 
-static int _kagura_got_phdr_cb(struct dl_phdr_info *info,
+static int got_phdr_cb(struct dl_phdr_info *info,
                                size_t size, void *data) {
     (void)size;
-    struct _kagura_got_scan_ctx *ctx = (struct _kagura_got_scan_ctx *)data;
+    struct got_scan_ctx *ctx = (struct got_scan_ctx *)data;
     if (ctx->found_hook) return 1; /* short-circuit */
 
     /* Walk program headers looking for PT_DYNAMIC */
@@ -165,8 +165,8 @@ static int _kagura_got_phdr_cb(struct dl_phdr_info *info,
 }
 
 int kagura_check_got_hooks(void) {
-    struct _kagura_got_scan_ctx ctx = { 0 };
-    dl_iterate_phdr(_kagura_got_phdr_cb, &ctx);
+    struct got_scan_ctx ctx = { 0 };
+    dl_iterate_phdr(got_phdr_cb, &ctx);
     return ctx.found_hook;
 }
 

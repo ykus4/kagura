@@ -44,7 +44,7 @@
  * ---------------------------------------------------------------------- */
 
 /* Shared probe from core/pathprobe.c (hardened: stat + access + open). */
-#define _ios_path_exists(p) kagura_path_exists_hardened(p)
+#define ios_path_exists(p) kagura_path_exists_hardened(p)
 
 /* -------------------------------------------------------------------------
  * Expanded jailbreak filesystem artifact detection
@@ -99,7 +99,7 @@ static const char *kJBPaths[] = {
 
 int kagura_jailbreak_fs_artifacts(void) {
     for (int i = 0; kJBPaths[i] != NULL; ++i)
-        if (_ios_path_exists(kJBPaths[i]))
+        if (ios_path_exists(kJBPaths[i]))
             return 1;
     return 0;
 }
@@ -147,7 +147,7 @@ int kagura_cydia_substrate_loaded(void) {
 
     /* Layer 3: path probes */
     for (int i = 0; kDlopenProbes[i] != NULL; ++i)
-        if (_ios_path_exists(kDlopenProbes[i]))
+        if (ios_path_exists(kDlopenProbes[i]))
             return 1;
 
     return 0;

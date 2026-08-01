@@ -29,7 +29,7 @@
  * `EnumerateTraceGuids` (deprecated but still works on Windows 10+) or the
  * newer `TdhEnumerateProviders`. The stub here demonstrates the API shape
  * without pulling in the full TDH dependency — wire it up by replacing the
- * `__kagura_etw_query_providers` body with the real enumeration code.
+ * `etw_query_providers` body with the real enumeration code.
  *
  *===----------------------------------------------------------------------===*/
 
@@ -81,7 +81,7 @@ static const wchar_t *kAnalysisToolProviders[] = {
  * deploying. Enable the real path by building with -DKAGURA_ETW_FULL=1 and
  * linking tdh.lib (see CMakeLists.txt commented-out block).
  */
-static int __kagura_etw_query_providers(const wchar_t *provider_guid) {
+static int etw_query_providers(const wchar_t *provider_guid) {
 #ifdef KAGURA_ETW_FULL
     /* Real implementation outline:
      *
@@ -121,7 +121,7 @@ static int __kagura_etw_query_providers(const wchar_t *provider_guid) {
  */
 int kagura_etw_provider_present(const wchar_t *provider_guid) {
     if (!provider_guid) return 0;
-    int r = __kagura_etw_query_providers(provider_guid);
+    int r = etw_query_providers(provider_guid);
     return r == 1 ? 1 : 0;
 }
 
