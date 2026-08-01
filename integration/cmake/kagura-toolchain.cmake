@@ -21,24 +21,33 @@
 #         -B build -S .
 #
 # ── Required variables ────────────────────────────────────────────────────────
-#   KAGURA_PLUGIN_PATH    Path to KaguraObfuscator.dylib / .so
+#   KAGURA_PLUGIN_PATH    Path to KaguraObfuscator.dylib / .so / .dll
+#                         (auto-discovered from ../../build/lib/Transforms,
+#                          or from the KAGURA_PLUGIN_PATH environment variable)
 #
 # ── Optional variables ────────────────────────────────────────────────────────
 #   KAGURA_RUNTIME_LIB    Path to libkagura_runtime.a
 #   KAGURA_CHAIN_TOOLCHAIN  Another toolchain file to include first
-#   KAGURA_PROFILE        Obfuscation profile: FAST | BALANCED | STRONG | OFF
+#   KAGURA_PROFILE        Obfuscation profile: FAST | BALANCED | STRONG | OFF,
+#                         or an absolute path to your own JSON policy file
 #                         (default: BALANCED)
-#   KAGURA_SEED           PRNG seed (default: 0 = entropy)
-#   KAGURA_BCF_PROB       Bogus CF probability (default: 30)
+#   KAGURA_EXTRA_PASSES   Extra "-kagura-*" flags appended after the profile,
+#                         e.g. "-kagura-objc;-kagura-vm"
+#   KAGURA_SEED           PRNG seed override (0 = entropy)
+#   KAGURA_BCF_PROB       Bogus CF probability override [0-100]
 #
 # ── Profiles ──────────────────────────────────────────────────────────────────
-#   FAST      str, sv, anti-debug
-#   BALANCED  str, fla, bcf, sub, ibr, bbr, sv, anti-debug, tamper  (default)
-#   STRONG    all passes including co, genc, bbs, dci, vm
+# The FAST / BALANCED / STRONG pass sets are NOT defined here. They live in
+# integration/profiles/{fast,balanced,strong}.json — the single source of
+# truth shared by every kagura integration — and are expanded at configure
+# time by integration/cmake/KaguraProfile.cmake.
+#
 #   OFF       no obfuscation (toolchain still chains correctly)
 # ─────────────────────────────────────────────────────────────────────────────
 
 cmake_minimum_required(VERSION 3.20)
+
+include("${CMAKE_CURRENT_LIST_DIR}/KaguraProfile.cmake")
 
 # ── Chain an existing toolchain ───────────────────────────────────────────────
 if(KAGURA_CHAIN_TOOLCHAIN AND NOT _KAGURA_CHAINED)
@@ -56,86 +65,49 @@ if(KAGURA_PROFILE STREQUAL "OFF")
 endif()
 
 # ── Locate plugin ─────────────────────────────────────────────────────────────
-if(NOT KAGURA_PLUGIN_PATH)
-  # Try common relative locations
-  foreach(_candidate
-      "${CMAKE_CURRENT_LIST_DIR}/../../build/lib/Transforms/KaguraObfuscator.dylib"
-      "${CMAKE_CURRENT_LIST_DIR}/../../build/lib/Transforms/KaguraObfuscator.so"
-  )
-    if(EXISTS "${_candidate}")
-      set(KAGURA_PLUGIN_PATH "${_candidate}")
-      break()
-    endif()
-  endforeach()
+# Handles .dylib (Apple), .so (Linux/Android) and .dll (Windows), and honours
+# both the CMake variable and the KAGURA_PLUGIN_PATH environment variable.
+kagura_find_plugin(_KAGURA_FOUND_PLUGIN)
+if(_KAGURA_FOUND_PLUGIN)
+  set(KAGURA_PLUGIN_PATH "${_KAGURA_FOUND_PLUGIN}")
 endif()
 
 if(NOT KAGURA_PLUGIN_PATH OR NOT EXISTS "${KAGURA_PLUGIN_PATH}")
   message(WARNING
     "[kagura] Plugin not found — obfuscation disabled.\n"
-    "  Set -DKAGURA_PLUGIN_PATH=/path/to/KaguraObfuscator.dylib")
+    "  Set -DKAGURA_PLUGIN_PATH=/path/to/KaguraObfuscator.{dylib,so,dll}")
   return()
 endif()
 
-# ── Build flag list from profile ──────────────────────────────────────────────
+# ── Build flag list from the shared profile ───────────────────────────────────
+# The pass list comes from integration/profiles/<profile>.json; nothing about
+# which passes a profile enables is duplicated here.
+
+set(_KAGURA_OVERRIDES "")
+if(KAGURA_EXTRA_PASSES)
+  list(APPEND _KAGURA_OVERRIDES ${KAGURA_EXTRA_PASSES})
+endif()
+if(DEFINED KAGURA_BCF_PROB)
+  list(APPEND _KAGURA_OVERRIDES "-kagura-bcf-prob=${KAGURA_BCF_PROB}")
+endif()
+if(DEFINED KAGURA_SEED)
+  list(APPEND _KAGURA_OVERRIDES "-kagura-seed=${KAGURA_SEED}")
+endif()
+
+kagura_profile_flags("${KAGURA_PROFILE}" _KAGURA_PASS_FLAGS
+                     OVERRIDES ${_KAGURA_OVERRIDES})
+
+if(NOT _KAGURA_PASS_FLAGS)
+  message(WARNING
+    "[kagura] Unknown KAGURA_PROFILE '${KAGURA_PROFILE}' and no overrides — "
+    "falling back to BALANCED")
+  kagura_profile_flags("BALANCED" _KAGURA_PASS_FLAGS)
+endif()
+
 set(_KAGURA_FLAGS "-fpass-plugin=${KAGURA_PLUGIN_PATH}")
-
-# Helper macro: append -mllvm <flag> pair
-macro(_kf _flag)
+foreach(_flag IN LISTS _KAGURA_PASS_FLAGS)
   string(APPEND _KAGURA_FLAGS " -mllvm ${_flag}")
-endmacro()
-
-if(KAGURA_PROFILE STREQUAL "FAST")
-  _kf(-kagura-str)
-  _kf(-kagura-sv)
-  _kf(-kagura-anti-debug)
-
-elseif(KAGURA_PROFILE STREQUAL "BALANCED")
-  _kf(-kagura-str)
-  _kf(-kagura-fla)
-  _kf(-kagura-bcf)
-  _kf(-kagura-sub)
-  _kf(-kagura-ibr)
-  _kf(-kagura-bbr)
-  _kf(-kagura-sv)
-  _kf(-kagura-anti-debug)
-  _kf(-kagura-tamper)
-
-elseif(KAGURA_PROFILE STREQUAL "STRONG")
-  _kf(-kagura-str)
-  _kf(-kagura-fla)
-  _kf(-kagura-bcf)
-  _kf(-kagura-sub)
-  _kf(-kagura-co)
-  _kf(-kagura-ibr)
-  _kf(-kagura-bbr)
-  _kf(-kagura-bbs)
-  _kf(-kagura-dci)
-  _kf(-kagura-sv)
-  _kf(-kagura-genc)
-  _kf(-kagura-anti-debug)
-  _kf(-kagura-tamper)
-  _kf(-kagura-vm)
-
-else()
-  message(WARNING "[kagura] Unknown KAGURA_PROFILE '${KAGURA_PROFILE}' — using BALANCED")
-  _kf(-kagura-str)
-  _kf(-kagura-fla)
-  _kf(-kagura-bcf)
-  _kf(-kagura-sub)
-  _kf(-kagura-ibr)
-  _kf(-kagura-bbr)
-  _kf(-kagura-sv)
-  _kf(-kagura-anti-debug)
-  _kf(-kagura-tamper)
-endif()
-
-# Tuning options
-if(DEFINED KAGURA_BCF_PROB AND NOT KAGURA_BCF_PROB EQUAL 30)
-  _kf(-kagura-bcf-prob=${KAGURA_BCF_PROB})
-endif()
-if(DEFINED KAGURA_SEED AND NOT KAGURA_SEED EQUAL 0)
-  _kf(-kagura-seed=${KAGURA_SEED})
-endif()
+endforeach()
 
 # ── Inject into compiler flags ────────────────────────────────────────────────
 # Use INIT variables so they take effect before project() sees them,
