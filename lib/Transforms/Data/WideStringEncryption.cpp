@@ -175,16 +175,28 @@ static GlobalVariable *extractCFStringChars(GlobalVariable *CFGV) {
 // Wide-string XOR encryption
 // ---------------------------------------------------------------------------
 
+/// Length of the per-string XOR key. The decrypt stubs index the key modulo
+/// this, so it must match on both sides.
+static constexpr unsigned kXorKeyLen = 8;
+
+/// Draw a fresh XOR key. One PRNG word covers all 8 bytes; keeping this in one
+/// place matters because the draw order determines every key in the module.
+static void makeXorKey(PRNG &RNG, uint8_t Key[kXorKeyLen]) {
+  uint64_t Rand = RNG.next();
+  for (unsigned I = 0; I < kXorKeyLen; ++I)
+    Key[I] = static_cast<uint8_t>((Rand >> (I * 8)) & 0xFF);
+}
+
 /// Encrypt a wide-character array in-place: XOR the low byte of each element.
 /// Returns the encrypted element values.
 static std::vector<uint64_t> encryptWideString(const ConstantDataArray *CDA,
-                                                const uint8_t Key[8]) {
+                                                const uint8_t Key[kXorKeyLen]) {
   unsigned N = CDA->getNumElements();
   std::vector<uint64_t> Enc(N);
   for (unsigned I = 0; I < N; ++I) {
     uint64_t Elem = CDA->getElementAsInteger(I);
     // XOR the low byte only so the encryption is unambiguous for both i16/i32.
-    Enc[I] = Elem ^ static_cast<uint64_t>(Key[I % 8]);
+    Enc[I] = Elem ^ static_cast<uint64_t>(Key[I % kXorKeyLen]);
   }
   return Enc;
 }
@@ -256,6 +268,40 @@ static Function *buildWideDecryptStub(Module &M, GlobalVariable *EncGV,
   B.CreateRetVoid();
 
   return F;
+}
+
+/// XOR-encrypt a narrow (i8) string global in place and return its decrypt
+/// stub, or nullptr if the initializer is not a byte array.
+///
+/// The CFString, Swift and Kotlin paths below were three byte-for-byte copies
+/// of this, differing only in how they recognise a global and how the stub gets
+/// named. StubPrefix supplies the latter; the caller's predicate the former.
+static Function *encryptNarrowStringInPlace(Module &M, GlobalVariable &GV,
+                                            PRNG &RNG, StringRef StubPrefix) {
+  auto *CDA = dyn_cast<ConstantDataArray>(GV.getInitializer());
+  if (!CDA)
+    return nullptr;
+
+  StringRef Raw = CDA->getAsString();
+  uint64_t Len  = Raw.size();
+
+  uint8_t Key[kXorKeyLen];
+  makeXorKey(RNG, Key);
+
+  auto *Int8Ty = Type::getInt8Ty(M.getContext());
+  std::vector<Constant *> EncBytes;
+  EncBytes.reserve(Len);
+  for (uint64_t I = 0; I < Len; ++I)
+    EncBytes.push_back(ConstantInt::get(
+        Int8Ty, static_cast<uint8_t>(Raw[I]) ^ Key[I % kXorKeyLen]));
+
+  // Must become mutable: the stub decrypts the bytes where they lie.
+  GV.setConstant(false);
+  GV.setInitializer(ConstantArray::get(ArrayType::get(Int8Ty, Len), EncBytes));
+
+  std::string Suffix = StubPrefix.str() + std::to_string(RNG.next32());
+  return buildWideDecryptStub(M, &GV, static_cast<unsigned>(Len),
+                              /*ElemBits=*/8, Key, Suffix);
 }
 
 // ---------------------------------------------------------------------------
@@ -338,10 +384,8 @@ PreservedAnalyses WideStringEncryptionPass::run(Module &M,
     unsigned N       = CDA->getNumElements();
     unsigned ElemBits = CDA->getType()->getElementType()->getIntegerBitWidth();
 
-    uint8_t Key[8];
-    uint64_t RandKey = RNG.next();
-    for (unsigned I = 0; I < 8; ++I)
-      Key[I] = static_cast<uint8_t>((RandKey >> (I * 8)) & 0xFF);
+    uint8_t Key[kXorKeyLen];
+    makeXorKey(RNG, Key);
 
     auto EncVals = encryptWideString(CDA, Key);
 
@@ -417,31 +461,9 @@ PreservedAnalyses WideStringEncryptionPass::run(Module &M,
     if (!CDA || !CDA->isString())
       continue;
 
-    StringRef Raw = CDA->getAsString();
-    uint64_t Len  = Raw.size();
-
-    uint8_t Key[8];
-    uint64_t RandKey = RNG.next();
-    for (unsigned I = 0; I < 8; ++I)
-      Key[I] = static_cast<uint8_t>((RandKey >> (I * 8)) & 0xFF);
-
-    // Encrypt
-    std::vector<Constant *> EncBytes;
-    EncBytes.reserve(Len);
-    for (uint64_t I = 0; I < Len; ++I)
-      EncBytes.push_back(ConstantInt::get(Int8Ty,
-          static_cast<uint8_t>(Raw[I]) ^ Key[I % 8]));
-    auto *EncConst = ConstantArray::get(
-        ArrayType::get(Int8Ty, Len), EncBytes);
-
-    CharGV->setConstant(false);
-    CharGV->setInitializer(EncConst);
-
-    std::string Suffix = std::to_string(RNG.next32());
-
-    // Build narrow XOR decrypt stub (reuses wide helper for i8)
-    Function *Stub = buildWideDecryptStub(
-        M, CharGV, static_cast<unsigned>(Len), 8, Key, "cf_" + Suffix);
+    Function *Stub = encryptNarrowStringInPlace(M, *CharGV, RNG, "cf_");
+    if (!Stub)
+      continue;
     CFDecryptors.push_back({CharGV, Stub});
 
     Changed = true;
@@ -456,32 +478,10 @@ PreservedAnalyses WideStringEncryptionPass::run(Module &M,
   for (auto &GV : M.globals()) {
     if (!isSwiftStringGlobal(GV))
       continue;
-    auto *CDA = dyn_cast<ConstantDataArray>(GV.getInitializer());
-    if (!CDA)
+    Function *Stub = encryptNarrowStringInPlace(
+        M, const_cast<GlobalVariable &>(GV), RNG, "swift_");
+    if (!Stub)
       continue;
-    StringRef Raw = CDA->getAsString();
-    uint64_t Len  = Raw.size();
-
-    uint8_t Key[8];
-    uint64_t RandKey = RNG.next();
-    for (unsigned I = 0; I < 8; ++I)
-      Key[I] = static_cast<uint8_t>((RandKey >> (I * 8)) & 0xFF);
-
-    // Encrypt in-place.
-    std::vector<Constant *> EncBytes;
-    EncBytes.reserve(Len);
-    for (uint64_t I = 0; I < Len; ++I)
-      EncBytes.push_back(ConstantInt::get(Int8Ty,
-          static_cast<uint8_t>(Raw[I]) ^ Key[I % 8]));
-    auto *EncConst = ConstantArray::get(ArrayType::get(Int8Ty, Len), EncBytes);
-
-    const_cast<GlobalVariable &>(GV).setConstant(false);
-    const_cast<GlobalVariable &>(GV).setInitializer(EncConst);
-
-    std::string Suffix = std::to_string(RNG.next32());
-    Function *Stub = buildWideDecryptStub(
-        M, &const_cast<GlobalVariable &>(GV),
-        static_cast<unsigned>(Len), 8, Key, "swift_" + Suffix);
     SwiftStubs.push_back(Stub);
 
     Changed = true;
@@ -498,31 +498,10 @@ PreservedAnalyses WideStringEncryptionPass::run(Module &M,
   for (auto &GV : M.globals()) {
     if (!isKotlinStringGlobal(GV))
       continue;
-    auto *CDA = dyn_cast<ConstantDataArray>(GV.getInitializer());
-    if (!CDA)
+    Function *Stub = encryptNarrowStringInPlace(
+        M, const_cast<GlobalVariable &>(GV), RNG, "kotlin_");
+    if (!Stub)
       continue;
-    StringRef Raw = CDA->getAsString();
-    uint64_t Len  = Raw.size();
-
-    uint8_t Key[8];
-    uint64_t RandKey = RNG.next();
-    for (unsigned I = 0; I < 8; ++I)
-      Key[I] = static_cast<uint8_t>((RandKey >> (I * 8)) & 0xFF);
-
-    std::vector<Constant *> EncBytes;
-    EncBytes.reserve(Len);
-    for (uint64_t I = 0; I < Len; ++I)
-      EncBytes.push_back(ConstantInt::get(Int8Ty,
-          static_cast<uint8_t>(Raw[I]) ^ Key[I % 8]));
-    auto *EncConst = ConstantArray::get(ArrayType::get(Int8Ty, Len), EncBytes);
-
-    const_cast<GlobalVariable &>(GV).setConstant(false);
-    const_cast<GlobalVariable &>(GV).setInitializer(EncConst);
-
-    std::string Suffix = std::to_string(RNG.next32());
-    Function *Stub = buildWideDecryptStub(
-        M, &const_cast<GlobalVariable &>(GV),
-        static_cast<unsigned>(Len), 8, Key, "kotlin_" + Suffix);
     KotlinStubs.push_back(Stub);
 
     Changed = true;
