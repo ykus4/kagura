@@ -66,7 +66,30 @@ int kagura_check_maps(void) {
     return 0;
 }
 
-// Check if Frida's default port (27042) is open on localhost
+#else // !__linux__
+
+// /proc does not exist off Linux.  The equivalent coverage there comes from
+// anti_debug/loaded_library_scan.c (dyld image list) — this only has to keep
+// the symbol's contract from internal.h true on every target.
+int kagura_check_maps(void) {
+    return 0;
+}
+
+#endif // __linux__
+
+// ---- Frida default-port probe (all POSIX targets) ----
+//
+// Frida Server / Gadget listens on 127.0.0.1:27042.  This used to live inside
+// the __linux__ block even though nothing about it is Linux-specific, so the
+// check silently did not exist on iOS and macOS — the platforms Frida is most
+// commonly used against.
+
+#if defined(__linux__) || defined(__APPLE__)
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+
 int kagura_check_frida_port(void) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return 0;
@@ -82,7 +105,7 @@ int kagura_check_frida_port(void) {
     return result == 0 ? 1 : 0; // connected = Frida is running
 }
 
-#endif // __linux__
+#endif // __linux__ || __APPLE__
 
 // ---- TracerPid check: non-Linux implementations ----
 //

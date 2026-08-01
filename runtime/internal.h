@@ -170,8 +170,11 @@ void *kagura_rtld_default_handle(void);
 /* breakpoint_detection.c */
 int  kagura_check_sw_breakpoints(void);
 int  kagura_check_hw_breakpoints(void);
-/* Aggregate: nonzero if any breakpoint check fired. */
-int  kagura_check_breakpoints(void);
+/* Aggregate RESPONSE, not a predicate: runs the two checks above and invokes
+ * the tamper hook on a hit.  It returns void and never reports back, so a
+ * caller that wants a yes/no answer must call the two predicates directly.
+ * ios/device_attest.c used to declare this `int` and branch on the result. */
+void kagura_check_breakpoints(void);
 
 /* hook_detection.c */
 int  kagura_check_inline_hooks(void);

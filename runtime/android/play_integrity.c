@@ -65,7 +65,7 @@
 #include <time.h>
 #include <jni.h>
 
-extern void kagura_on_tamper_detected(void);
+#include "../internal.h"
 
 /* ---- Nonce generation --------------------------------------------------- */
 
@@ -203,21 +203,23 @@ int kagura_play_integrity_verdict_ok(const char *jwt_payload_b64url) {
  * Integrity request.  It is NOT a replacement for Play Integrity.
  */
 
-/* Forward declarations for checks implemented in other compilation units */
-extern int kagura_root_check(void)        __attribute__((weak));
-extern int kagura_frida_check(void)       __attribute__((weak));
-extern int kagura_art_jit_suspicious(void)__attribute__((weak));
-extern int kagura_jdwp_active(void)       __attribute__((weak));
-
+/*
+ * The root and Frida probes below were previously declared here as
+ *   extern int kagura_root_check(void)  __attribute__((weak));
+ *   extern int kagura_frida_check(void) __attribute__((weak));
+ * Neither symbol has ever existed under those names, so both pointers were
+ * NULL and this function screened for nothing but ART JIT and JDWP.  Same
+ * defect as game/integrity_report.c had.  Real names come from internal.h.
+ */
 int kagura_play_integrity_local_check(void) {
-    /* Root / Magisk / Zygisk presence */
-    if (kagura_root_check && kagura_root_check())         return 0;
-    /* Frida / Substrate gadget */
-    if (kagura_frida_check && kagura_frida_check())        return 0;
+    /* Root / Magisk / Zygisk / Xposed presence */
+    if (kagura_magisk_present() || kagura_xposed_present())  return 0;
+    /* Frida / Substrate gadget loaded into the process */
+    if (kagura_suspicious_lib_loaded())                      return 0;
     /* Suspicious JIT region (instrumentation framework) */
-    if (kagura_art_jit_suspicious && kagura_art_jit_suspicious()) return 0;
+    if (kagura_art_jit_suspicious())                         return 0;
     /* Active JDWP debugger connection */
-    if (kagura_jdwp_active && kagura_jdwp_active())        return 0;
+    if (kagura_jdwp_active())                                return 0;
     return 1;
 }
 
