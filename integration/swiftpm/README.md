@@ -67,7 +67,7 @@ detection, AES, VM interpreter, anti-cheat helpers). The compiler plugin
 first-class support for clang pass plugins of this type.
 
 To enable obfuscation, load the plugin through Xcode build settings and point
-it at one of the [shared profiles](../profiles/README.md):
+it at one of the [shared profiles](https://github.com/ykus4/kagura/tree/main/integration/profiles):
 
 ```
 OTHER_CFLAGS      = $(inherited) -fpass-plugin=$(KAGURA_PLUGIN_PATH) \

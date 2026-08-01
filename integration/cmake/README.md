@@ -65,7 +65,7 @@ includes it first, then layers the obfuscation flags on top.
 
 The pass set for each profile is **not** defined in this toolchain file. It is
 read at configure time from the shared policy files in
-[`integration/profiles`](../profiles/README.md):
+[`integration/profiles`](https://github.com/ykus4/kagura/tree/main/integration/profiles):
 
 | Profile | Definition |
 |:--------|:-----------|

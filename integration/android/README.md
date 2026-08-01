@@ -111,7 +111,7 @@ the profile (later flag wins), and `-kagura-config` is dropped so the
 
 The pass set for each profile is **not** defined in this integration. It is
 read at configure time from the shared policy files in
-[`integration/profiles`](../profiles/README.md), which is what keeps the
+[`integration/profiles`](https://github.com/ykus4/kagura/tree/main/integration/profiles), which is what keeps the
 Android, Xcode, CMake, Unity, Unreal and Bazel integrations from drifting
 apart:
 

@@ -97,7 +97,7 @@ kagura_cc_library(
 
 | Arg | Default | Meaning |
 |:----|:--------|:--------|
-| `kagura_config` | `None` | Label of a JSON policy file. Use `profile_fast` / `profile_balanced` / `profile_strong` from this package, or your own — see [Configuration](https://ykus4.github.io/kagura/configuration/) and [`integration/profiles`](../profiles/README.md) |
+| `kagura_config` | `None` | Label of a JSON policy file. Use `profile_fast` / `profile_balanced` / `profile_strong` from this package, or your own — see [Configuration](https://ykus4.github.io/kagura/configuration/) and [`integration/profiles`](https://github.com/ykus4/kagura/tree/main/integration/profiles) |
 | `kagura_passes` | `["-kagura-str", "-kagura-fla", "-kagura-bcf", "-kagura-sub"]` when `kagura_config` is unset, otherwise `[]` | Explicit `-kagura-*` flags. Applied after the profile, so they override it |
 
 All other `cc_binary` / `cc_library` arguments (`srcs`, `hdrs`, `deps`,

@@ -68,7 +68,7 @@ public class YourGameTarget : TargetRules
 
 By default the toolchain emits a single obfuscation flag,
 `-mllvm -kagura-config=<kagura>/integration/profiles/<profile>.json`. The pass
-set for each profile lives in [`integration/profiles`](../profiles/README.md),
+set for each profile lives in [`integration/profiles`](https://github.com/ykus4/kagura/tree/main/integration/profiles),
 the single source of truth shared by every kagura integration.
 
 Environment variables (no code edit needed):

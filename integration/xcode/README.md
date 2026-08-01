@@ -116,7 +116,7 @@ KAGURA_PROFILE = balanced       // fast | balanced | strong | off | <path.json>
 ```
 
 The pass set for each profile is **not** defined in this integration. It lives
-in [`integration/profiles/<name>.json`](../profiles/README.md), the single
+in [`integration/profiles/<name>.json`](https://github.com/ykus4/kagura/tree/main/integration/profiles), the single
 source of truth shared by all kagura integrations. `kagura-flags.sh` emits
 both `-mllvm -kagura-config=<json>` and the flag list expanded from that same
 JSON, so the build is configured identically whether or not the
@@ -400,7 +400,7 @@ that codesign measures.
 The table below shows recommended flag combinations for three common scenarios.
 
 The authoritative FAST / BALANCED / STRONG pass sets are the JSON files in
-[`integration/profiles`](../profiles/README.md); read those rather than a table
+[`integration/profiles`](https://github.com/ykus4/kagura/tree/main/integration/profiles); read those rather than a table
 here, which is how the six copies of this list drifted apart in the first
 place. Select one with:
 

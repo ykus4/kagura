@@ -34,7 +34,7 @@ All settings are stored in `EditorPrefs` and can be changed via the
 
 When **Use Profile** is on, the only obfuscation flag emitted is
 `-mllvm -kagura-config=<kagura>/integration/profiles/<profile>.json`. The pass
-set for each profile lives in [`integration/profiles`](../profiles/README.md),
+set for each profile lives in [`integration/profiles`](https://github.com/ykus4/kagura/tree/main/integration/profiles),
 the single source of truth shared by every kagura integration — read those
 files rather than the table below, which only applies to the explicit-flag
 fallback path (**Use Profile** off, or the profile file missing).

@@ -92,7 +92,7 @@ pass-plugin headers and are deliberately not part of the pod.
 
 The build phase defaults to
 `${KAGURA_ROOT}/integration/profiles/balanced.json`, the
-[shared profile](../profiles/README.md) used by every kagura integration.
+[shared profile](https://github.com/ykus4/kagura/tree/main/integration/profiles) used by every kagura integration.
 Point `KAGURA_PROFILE_JSON` at `fast.json`, `strong.json` or your own policy
 file to change it.
 
