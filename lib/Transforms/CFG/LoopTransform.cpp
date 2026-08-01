@@ -229,11 +229,15 @@ static bool splitLoopCounter(Loop *L, IRBuilder<> &EntryB) {
   Value *InitHigh = PreB.CreateTrunc(
       PreB.CreateLShr(Init64, ConstantInt::get(I64, 32)), I32, "lt.init_high");
 
-  // Insert PHI nodes for i_low and i_high in the header.
-  auto *PhiLow  = PHINode::Create(I32, 2, "lt.i_low");
-  PhiLow->insertBefore(&*Header->begin());
-  auto *PhiHigh = PHINode::Create(I32, 2, "lt.i_high");
-  PhiHigh->insertAfter(PhiLow);
+  // Insert PHI nodes for i_low and i_high at the very top of the header.
+  //
+  // Built through IRBuilder rather than PHINode::Create + insertBefore: the
+  // Instruction* overload of insertBefore is deprecated from LLVM 18 on, and
+  // the iterator overload that replaces it does not exist in 17. Positioning
+  // the builder avoids needing either.
+  IRBuilder<> HeadB(Header, Header->begin());
+  auto *PhiLow  = HeadB.CreatePHI(I32, 2, "lt.i_low");
+  auto *PhiHigh = HeadB.CreatePHI(I32, 2, "lt.i_high");
 
   PhiLow->addIncoming(InitLow,  Preheader);
   PhiHigh->addIncoming(InitHigh, Preheader);
