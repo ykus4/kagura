@@ -44,11 +44,8 @@ static remap_entry_t *g_table   = NULL;
 static size_t         g_count   = 0;
 static size_t         g_cap     = 0;
 
-static uint32_t str_hash(const char *s) {
-    uint32_t h = 0x811c9dc5u;
-    while (*s) { h ^= (uint8_t)*s++; h *= 0x01000193u; }
-    return h;
-}
+/* FNV-1a-32 over the name; implementation shared via core/hash.c. */
+#define str_hash(s) kagura_fnv1a32_str(s)
 
 static void table_insert(const char *orig, const char *obf);
 

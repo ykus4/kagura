@@ -41,11 +41,10 @@
  * Helper: file-existence probe
  * ---------------------------------------------------------------------- */
 
-/** Returns 1 if the given path exists (stat succeeds), 0 otherwise. */
-static int path_exists(const char *path) {
-    struct stat st;
-    return (stat(path, &st) == 0) ? 1 : 0;
-}
+/* Shared probe from core/pathprobe.c.  The hardened variant asks stat, access
+ * and open rather than stat alone: jailbreak hiders routinely hook exactly one
+ * of the three. */
+#define path_exists(p) kagura_path_exists_hardened(p)
 
 /* =========================================================================
  * iOS / macOS jailbreak detection
@@ -112,41 +111,9 @@ int kagura_check_cydia_path(void) {
  * Returns 1 if a suspicious dylib is found, 0 otherwise.
  */
 int kagura_check_substrate_dylib(void) {
-    /* Weak-link the dyld APIs so we can handle the case where they are absent
-     * (e.g., when running under a simulator build of the runtime). */
-    extern int          _dyld_image_count(void)
-        __attribute__((weak_import));
-    extern const char * _dyld_get_image_name(unsigned int image_index)
-        __attribute__((weak_import));
-
-    static const char *SuspiciousLibs[] = {
-        "MobileSubstrate",
-        "CydiaSubstrate",
-        "FridaGadget",
-        "frida-gadget",
-        "frida-agent",
-        "cynject",
-        "libhooker",
-        "SubstrateLoader",
-        "cycript",
-        "SSLKillSwitch",
-        NULL
-    };
-
-    if (!_dyld_image_count || !_dyld_get_image_name)
-        return 0;
-
-    int count = _dyld_image_count();
-    for (int i = 0; i < count; ++i) {
-        const char *name = _dyld_get_image_name((unsigned int)i);
-        if (!name)
-            continue;
-        for (int j = 0; SuspiciousLibs[j] != NULL; ++j) {
-            if (strstr(name, SuspiciousLibs[j]))
-                return 1;
-        }
-    }
-    return 0;
+    /* The ten-name local list is superseded by the union table in
+     * core/imagelist.c, which also folds case. */
+    return kagura_image_list_contains(kagura_suspicious_image_patterns());
 }
 
 /* --- Check 3: Sandbox escape via write probe ---------------------------- */
@@ -432,10 +399,12 @@ void kagura_self_check(void) {
  * ====================================================================== */
 
 /*
- * FNV-1a 32-bit constants — must match AntiTamper.cpp exactly.
+ * FNV-1a 32-bit offset basis — must match AntiTamper.cpp exactly.  Used below
+ * only as a mixing constant for the guard tag; the hash itself lives in
+ * core/hash.c.  KAGURA_FNV1A_PRIME used to be defined here too and was never
+ * referenced.
  */
 #define KAGURA_FNV1A_OFFSET_BASIS UINT32_C(0x811c9dc5)
-#define KAGURA_FNV1A_PRIME        UINT32_C(0x01000193)
 
 /**
  * kagura_runtime_hash_check

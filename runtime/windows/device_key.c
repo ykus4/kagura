@@ -30,18 +30,9 @@
 #include <windows.h>
 
 /* ---- FNV-1a-32 ----------------------------------------------------------- */
+/* Shared implementation in core/hash.c. */
 
-#define FNV_OFFSET_BASIS 0x811c9dc5u
-#define FNV_PRIME        0x01000193u
-
-static uint32_t fnv1a32(const uint8_t *data, size_t len) {
-    uint32_t h = FNV_OFFSET_BASIS;
-    for (size_t i = 0; i < len; ++i) {
-        h ^= data[i];
-        h *= FNV_PRIME;
-    }
-    return h;
-}
+#define fnv1a32(data, len) kagura_fnv1a32_buf((data), (len))
 
 /* ---- Collect device entropy ---------------------------------------------- */
 

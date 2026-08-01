@@ -42,13 +42,11 @@
 #include <unistd.h>
 #include <dlfcn.h>
 
-/* ---- FNV-1a-64 (local copy to avoid cross-TU header dependency) --------- */
+/* ---- FNV-1a-64 ----------------------------------------------------------
+ * Was a local copy "to avoid a cross-TU header dependency"; runtime/internal.h
+ * now provides that dependency, so it forwards to core/hash.c. */
 
-static uint64_t split_fnv64(const uint8_t *d, size_t n) {
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (size_t i = 0; i < n; ++i) { h ^= d[i]; h *= 0x100000001b3ULL; }
-    return h;
-}
+#define split_fnv64(d, n) kagura_fnv1a64_buf((d), (n))
 
 /* ---- 1. Split APK detection ---------------------------------------------- */
 

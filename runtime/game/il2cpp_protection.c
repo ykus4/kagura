@@ -42,29 +42,9 @@
  * Internal helpers
  * ---------------------------------------------------------------------- */
 
-/*
- * FNV-1a 32-bit hash — must match constants used elsewhere in the runtime.
- */
-#define KAGURA_FNV1A_OFFSET_BASIS UINT32_C(0x811c9dc5)
-#define KAGURA_FNV1A_PRIME        UINT32_C(0x01000193)
-
-/**
- * _kagura_fnv1a32 - Compute an FNV-1a 32-bit hash over a byte buffer.
- *
- * @data:  Pointer to the data to hash.
- * @len:   Number of bytes to consume.
- *
- * Returns the 32-bit digest.
- */
-static uint32_t _kagura_fnv1a32(const void *data, size_t len) {
-    const uint8_t *p    = (const uint8_t *)data;
-    uint32_t       hash = KAGURA_FNV1A_OFFSET_BASIS;
-    for (size_t i = 0; i < len; ++i) {
-        hash ^= (uint32_t)p[i];
-        hash *= KAGURA_FNV1A_PRIME;
-    }
-    return hash;
-}
+/* FNV-1a-32 shared via core/hash.c — the constants used to be redeclared
+ * here and in four other files. */
+#define il2cpp_fnv1a32(data, len) kagura_fnv1a32_buf((data), (len))
 
 /*
  * IL2CPP global-metadata.dat magic bytes (little-endian u32 = 0xFAB11BAF).
@@ -174,7 +154,7 @@ int kagura_il2cpp_check_metadata_integrity(void) {
     /* ---- c) FNV-1a hash check (optional, requires build-time constant) ---- */
 #ifdef KAGURA_EXPECTED_METADATA_HASH
     {
-        uint32_t actual_hash = _kagura_fnv1a32(buf, n);
+        uint32_t actual_hash = il2cpp_fnv1a32(buf, n);
         if (actual_hash != (uint32_t)(KAGURA_EXPECTED_METADATA_HASH))
             return 1;
     }
@@ -407,121 +387,48 @@ int kagura_protect_global_metadata(const char *metadata_path) {
  * 5. kagura_il2cpp_anti_memory_scan
  * ====================================================================== */
 
-/* --- Android / Linux implementation ------------------------------------ */
-
-#if defined(__ANDROID__) || defined(__linux__)
-
-/**
- * _kagura_il2cpp_check_maps
- *
- * Scans /proc/self/maps for memory regions that belong to known IL2CPP hooking
- * or memory-scanning tools.  This is an extension of the general-purpose maps
- * check in anti_debug.c with patterns specific to Unity mod loaders.
- *
- * Returns 1 if a suspicious region is found, 0 otherwise.
+/*
+ * Unity-specific mod loaders and memory editors.  Kept local rather than
+ * added to the shared table in core/imagelist.c because "libgg" is short
+ * enough to match unrelated libraries (libggml), and a false positive here
+ * terminates the process.  The generic frameworks this list used to repeat
+ * ("frida-agent", "libsubstrate", "libdobby", ...) live in the shared table.
  */
-static int _kagura_il2cpp_check_maps(void) {
-    static const char *Patterns[] = {
-        /* General hook frameworks */
-        "frida-agent",
-        "frida-gadget",
-        "libsubstrate",
-        "libcycript",
-        "libdobby",
-        /* Unity-specific mod loaders */
-        "BepInEx",
-        "MelonLoader",
-        "libil2cppdumper",
-        "Il2CppInspector",
-        /* Memory scan / cheat tools */
-        "libGameGuardian",
-        "libgg",
-        "GameGuardian",
-        NULL
-    };
-
-    FILE *f = fopen("/proc/self/maps", "r");
-    if (!f)
-        return 0;
-
-    char line[512];
-    while (fgets(line, (int)sizeof(line), f)) {
-        for (int i = 0; Patterns[i] != NULL; ++i) {
-            if (strstr(line, Patterns[i])) {
-                fclose(f);
-                return 1;
-            }
-        }
-    }
-    fclose(f);
-    return 0;
-}
-
-#endif /* __ANDROID__ || __linux__ */
+static const char *const kUnityCheatTools[] = {
+    "BepInEx",
+    "MelonLoader",
+    "Il2CppAssemblyUnhollower",
+    "libil2cppdumper",
+    "Il2CppInspector",
+    "GameGuardian",
+    "libGameGuardian",
+    "libgg",
+    NULL
+};
 
 /**
  * kagura_il2cpp_anti_memory_scan
  *
- * Performs a platform-appropriate check for active memory scanners or code
- * injection frameworks targeting the IL2CPP runtime:
+ * Checks for active memory scanners or code-injection frameworks targeting
+ * the IL2CPP runtime.  Both layers are platform-independent now: the image
+ * walk is dyld on Apple, dl_iterate_phdr plus /proc/self/maps on
+ * Linux/Android, and the Toolhelp module list on Windows.
  *
- *   Android / Linux:
- *     Calls _kagura_il2cpp_check_maps() to scan /proc/self/maps for regions
- *     belonging to known Unity mod loaders (BepInEx, MelonLoader), memory
- *     editors (GameGuardian), and general hook frameworks (Frida, Dobby).
- *
- *   iOS / macOS:
- *     Calls kagura_check_substrate_dylib() from jailbreak_detection.c to walk
- *     the loaded dylib list for MobileSubstrate, FridaGadget, and related
- *     injection libraries.  Also checks for the MelonLoader dylib specifically.
- *
- * Returns 0 if no active scanner is detected, 1 if one is found.
+ * Returns 1 if one is found, 0 otherwise.
  */
 int kagura_il2cpp_anti_memory_scan(void) {
-#if defined(__ANDROID__) || defined(__linux__)
-    if (_kagura_il2cpp_check_maps())
-        return 1;
-#endif /* __ANDROID__ || __linux__ */
-
-#if defined(__APPLE__)
-    /*
-     * Reuse the substrate/Frida dylib scan from jailbreak_detection.c.
-     * This covers FridaGadget, MobileSubstrate, libhooker, and similar.
-     */
-    if (kagura_check_substrate_dylib())
+    /* Shared injection frameworks: dyld on Apple, dl_iterate_phdr plus
+     * /proc/self/maps on Linux/Android, module list on Windows.  This
+     * replaces the separate maps scan and the two hand-rolled dyld walks
+     * (one of which just called kagura_check_substrate_dylib). */
+    if (kagura_image_list_contains(kagura_suspicious_image_patterns()))
         return 1;
 
-    /*
-     * Additional Unity-specific dylib check: scan for MelonLoader which uses
-     * a .dylib injected into the IL2CPP process on jailbroken iOS.
-     */
-    {
-        extern int          _dyld_image_count(void)
-            __attribute__((weak_import));
-        extern const char * _dyld_get_image_name(unsigned int)
-            __attribute__((weak_import));
-
-        static const char *UnityHookLibs[] = {
-            "MelonLoader",
-            "BepInEx",
-            "Il2CppAssemblyUnhollower",
-            NULL
-        };
-
-        if (_dyld_image_count && _dyld_get_image_name) {
-            int img_count = _dyld_image_count();
-            for (int i = 0; i < img_count; ++i) {
-                const char *name = _dyld_get_image_name((unsigned int)i);
-                if (!name)
-                    continue;
-                for (int j = 0; UnityHookLibs[j] != NULL; ++j) {
-                    if (strstr(name, UnityHookLibs[j]))
-                        return 1;
-                }
-            }
-        }
-    }
-#endif /* __APPLE__ */
+    /* Unity-specific tooling. */
+    if (kagura_image_list_contains(kUnityCheatTools))
+        return 1;
+    if (kagura_maps_contain(kUnityCheatTools))
+        return 1;
 
     return 0;
 }

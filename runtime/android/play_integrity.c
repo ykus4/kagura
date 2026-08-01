@@ -85,12 +85,7 @@ void kagura_play_integrity_nonce(char *out_hex32, size_t len) {
     words[3] = ++counter ^ (uint32_t)(uintptr_t)out_hex32;
 
     /* FNV-1a mix for better distribution */
-    uint64_t h = 0xcbf29ce484222325ULL;
-    const uint8_t *p = (const uint8_t *)words;
-    for (int i = 0; i < 16; ++i) {
-        h ^= p[i];
-        h *= 0x100000001b3ULL;
-    }
+    uint64_t h = kagura_fnv1a64_buf(words, sizeof(words));
     uint32_t hi = (uint32_t)(h >> 32);
     uint32_t lo = (uint32_t)(h & 0xFFFFFFFFU);
 

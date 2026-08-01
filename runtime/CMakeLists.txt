@@ -9,6 +9,10 @@ set(KAGURA_RUNTIME_CORE_SOURCES
   core/random.c
   core/tamper_response.c
   core/soft_response.c
+  core/hash.c
+  core/pathprobe.c
+  core/procfs.c
+  core/imagelist.c
 )
 
 add_library(kagura_runtime STATIC ${KAGURA_RUNTIME_CORE_SOURCES})

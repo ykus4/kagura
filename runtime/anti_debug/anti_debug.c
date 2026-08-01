@@ -39,31 +39,11 @@ int kagura_check_tracer_pid(void) {
     return 0;
 }
 
-// Check /proc/self/maps for known analysis framework strings
+// Check /proc/self/maps for known analysis framework strings.
+// The local five-entry pattern list is gone: core/imagelist.c holds the union
+// of every framework list in the runtime, so this now sees all of them.
 int kagura_check_maps(void) {
-    static const char *Patterns[] = {
-        "frida-agent",
-        "frida-gadget",
-        "libsubstrate",
-        "libcycript",
-        "xposed",
-        NULL
-    };
-
-    FILE *f = fopen("/proc/self/maps", "r");
-    if (!f) return 0;
-
-    char line[512];
-    while (fgets(line, sizeof(line), f)) {
-        for (int i = 0; Patterns[i]; ++i) {
-            if (strstr(line, Patterns[i])) {
-                fclose(f);
-                return 1;
-            }
-        }
-    }
-    fclose(f);
-    return 0;
+    return kagura_maps_contain(kagura_suspicious_image_patterns());
 }
 
 #else // !__linux__
@@ -147,37 +127,11 @@ int kagura_check_tracer_pid(void) {
 // ---- iOS / macOS checks ----
 
 #ifdef __APPLE__
-#include <dlfcn.h>
 
-// Scan loaded dylibs for known injection frameworks
+// Scan loaded dylibs for known injection frameworks.  The six-name local list
+// this used to carry is superseded by the union table in core/imagelist.c.
 int kagura_check_loaded_dylibs(void) {
-    // Use weak-linked dyld APIs to avoid hard dependency
-    extern int _dyld_image_count(void) __attribute__((weak_import));
-    extern const char *_dyld_get_image_name(unsigned) __attribute__((weak_import));
-
-    static const char *Patterns[] = {
-        "FridaGadget",
-        "frida-gadget",
-        "cynject",
-        "libsubstrate",
-        "cycript",
-        "libhooker",
-        NULL
-    };
-
-    if (!_dyld_image_count || !_dyld_get_image_name)
-        return 0;
-
-    int count = _dyld_image_count();
-    for (int i = 0; i < count; ++i) {
-        const char *name = _dyld_get_image_name((unsigned)i);
-        if (!name) continue;
-        for (int j = 0; Patterns[j]; ++j) {
-            if (strstr(name, Patterns[j]))
-                return 1;
-        }
-    }
-    return 0;
+    return kagura_image_list_contains(kagura_suspicious_image_patterns());
 }
 
 #endif // __APPLE__

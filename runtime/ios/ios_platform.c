@@ -77,43 +77,13 @@ void kagura_entitlements_check(void) {}
 
 /* ── dyld image list inspection ─────────────────────────────────────── */
 
-static const char *const kSuspiciousDylibs[] = {
-    "FridaGadget",
-    "frida",
-    "cynject",
-    "substrate",
-    "substitute",
-    "cycript",
-    "libhooker",
-    "jtool",
-    NULL
-};
+/* The former kSuspiciousDylibs table is now part of the union in core/imagelist.c. */
 
 int kagura_dyld_suspicious(void) {
-    uint32_t count = _dyld_image_count();
-    for (uint32_t i = 0; i < count; ++i) {
-        const char *name = _dyld_get_image_name(i);
-        if (!name) continue;
-        /* Case-insensitive substring check */
-        for (int j = 0; kSuspiciousDylibs[j]; ++j) {
-            const char *pat = kSuspiciousDylibs[j];
-            size_t plen = strlen(pat);
-            size_t nlen = strlen(name);
-            if (nlen < plen) continue;
-            for (size_t k = 0; k <= nlen - plen; ++k) {
-                int match = 1;
-                for (size_t l = 0; l < plen; ++l) {
-                    char nc = name[k + l];
-                    char pc = pat[l];
-                    if (nc >= 'A' && nc <= 'Z') nc = (char)(nc + 32);
-                    if (pc >= 'A' && pc <= 'Z') pc = (char)(pc + 32);
-                    if (nc != pc) { match = 0; break; }
-                }
-                if (match) return 1;
-            }
-        }
-    }
-    return 0;
+    /* This function's hand-rolled case-insensitive matcher is now
+     * kagura_contains_ci() in core/imagelist.c, and its eight-name list is
+     * folded into the shared union table. */
+    return kagura_image_list_contains(kagura_suspicious_image_patterns());
 }
 
 void kagura_dyld_image_check(void) {

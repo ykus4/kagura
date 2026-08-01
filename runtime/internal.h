@@ -84,11 +84,18 @@ void kagura_soft_response_reset(void);
  * Shared helpers  (runtime/core/hash.c, procfs.c, pathprobe.c, imagelist.c)
  * =========================================================================== */
 
-/* FNV-1a. */
+/* FNV-1a.  The 32-bit form must stay bit-identical to the compile-time hash
+ * in Telemetry.cpp / AntiTamper.cpp — see core/hash.c. */
 uint32_t kagura_fnv1a32_buf(const void *data, size_t len);
 uint64_t kagura_fnv1a64_buf(const void *data, size_t len);
 uint32_t kagura_fnv1a32_str(const char *s);
 uint64_t kagura_fnv1a64_str(const char *s);
+uint32_t kagura_fnv1a32_update(uint32_t h, const void *data, size_t len);
+uint64_t kagura_fnv1a64_update(uint64_t h, const void *data, size_t len);
+
+/* Historical spelling kept for ABI compatibility; core/blob_integrity.c
+ * exports it and it simply forwards to kagura_fnv1a32_buf. */
+uint32_t kagura_fnv1a32(const uint8_t *data, uint32_t len);
 
 /* Path probing: 1 if the path exists / is readable, 0 otherwise.
  * kagura_path_exists uses access(F_OK), which some jailbreak hiders hook;
@@ -112,6 +119,11 @@ int kagura_maps_contain(const char *const *patterns);
  *                                pattern table (NULL-terminated). */
 int kagura_image_list_contains(const char *const *patterns);
 const char *const *kagura_suspicious_image_patterns(void);
+
+/* ASCII case-insensitive substring match, shared by the image and procfs
+ * scanners so both fold case the same way. */
+int kagura_contains_ci(const char *haystack, const char *needle);
+int kagura_name_matches_any(const char *name, const char *const *patterns);
 
 /* Entropy source for the PAC key constructor emitted by PointerAuth.cpp. */
 uint64_t kagura_random_u64(void);

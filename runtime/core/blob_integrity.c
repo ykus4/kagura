@@ -19,16 +19,10 @@
 
 #include <stdint.h>
 
-#define FNV_OFFSET_BASIS 0x811c9dc5u
-#define FNV_PRIME        0x01000193u
-
+/* Kept as an exported symbol for ABI compatibility; the implementation lives
+ * in core/hash.c along with the other seven former copies of FNV-1a. */
 uint32_t kagura_fnv1a32(const uint8_t *data, uint32_t len) {
-    uint32_t hash = FNV_OFFSET_BASIS;
-    for (uint32_t i = 0; i < len; ++i) {
-        hash ^= data[i];
-        hash *= FNV_PRIME;
-    }
-    return hash;
+    return kagura_fnv1a32_buf(data, len);
 }
 
 void kagura_check_blob_integrity(const uint8_t *blob, uint32_t len,

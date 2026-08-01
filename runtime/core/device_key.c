@@ -59,12 +59,10 @@ static int read_file_line(const char *path, char *out, size_t outsz) {
 }
 
 /* ── FNV-1a-64 ──────────────────────────────────────────────────────────── */
+/* Thin adapter over core/hash.c so the constants live in exactly one place. */
 
 static void fnv1a64_bytes(uint64_t *h, const uint8_t *data, size_t len) {
-    for (size_t i = 0; i < len; ++i) {
-        *h ^= data[i];
-        *h *= 0x100000001b3ULL;
-    }
+    *h = kagura_fnv1a64_update(*h, data, len);
 }
 
 /* ── Public API ─────────────────────────────────────────────────────────── */
