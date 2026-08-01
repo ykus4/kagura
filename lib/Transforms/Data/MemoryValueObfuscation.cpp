@@ -44,6 +44,11 @@ static bool isSupportedWidth(unsigned Bits) {
   return Bits == 8 || Bits == 16 || Bits == 32 || Bits == 64;
 }
 
+/// All-ones mask for an N-bit value, avoiding the UB of `1ULL << 64`.
+static uint64_t maskForWidth(unsigned Bits) {
+  return Bits >= 64 ? ~0ULL : ((1ULL << Bits) - 1);
+}
+
 /// Returns true if the alloca pointer escapes the function (address taken).
 /// We consider an address "escaped" if it is passed to a Call/Invoke, stored
 /// into memory, or used in a PHI/Select.
@@ -116,7 +121,11 @@ PreservedAnalyses MemoryValueObfuscationPass::run(Function &F,
   for (AllocaInst *AI : Targets) {
     Type *IntTy    = AI->getAllocatedType();
     unsigned Bits  = IntTy->getIntegerBitWidth();
-    uint64_t RawK  = RNG.next();
+    // Mask the 64-bit draw down to the alloca's width before handing it to
+    // APInt: the APInt(BitWidth, uint64_t) constructor asserts that the value
+    // already fits, so an unmasked draw crashes an assertions-enabled build for
+    // every i8/i16/i32 alloca.
+    uint64_t RawK  = RNG.next() & maskForWidth(Bits);
     APInt Key(Bits, RawK);
     auto *KeyConst = ConstantInt::get(IntTy, Key);
 
