@@ -5,54 +5,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ---- A.1: MSVC / Clang-CL compiler flags ----------------------------------
-if(MSVC)
-  # /utf-8          : source and execution charset both UTF-8
-  # /W3             : warning level 3 (matches clang -Wall)
-  # /WX-            : warnings are not errors (LLVM headers trigger some)
-  # /EHsc           : standard C++ exception handling (required by LLVM)
-  # /Zc:__cplusplus : make _cplusplus reflect the actual standard
-  # /wd4624 /wd4244 : suppress common LLVM-generated warnings on MSVC
-  add_compile_options(
-    /utf-8
-    /W3
-    /WX-
-    /EHsc
-    /Zc:__cplusplus
-    /wd4624
-    /wd4244
-  )
-  # Suppress MSVC's min/max macros that conflict with std::min/std::max
-  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
-elseif(WIN32)
-  # Clang-CL or MinGW cross-compile targeting Windows
-  add_compile_options(-Wall -Wno-unused-parameter)
-  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
-endif()
-# ---------------------------------------------------------------------------
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
-# ---- Build cache support ----------------------------------------------------
-# Enable ccache / sccache if available. Set KAGURA_USE_CACHE=OFF to disable.
-option(KAGURA_USE_CACHE "Use compiler cache (ccache/sccache) if available" ON)
-if(KAGURA_USE_CACHE)
-  # Prefer sccache (cloud-friendly) over ccache.
-  find_program(SCCACHE_PROGRAM sccache)
-  find_program(CCACHE_PROGRAM  ccache)
-  if(SCCACHE_PROGRAM)
-    message(STATUS "[kagura] Build cache: sccache (${SCCACHE_PROGRAM})")
-    set(CMAKE_C_COMPILER_LAUNCHER   "${SCCACHE_PROGRAM}")
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${SCCACHE_PROGRAM}")
-  elseif(CCACHE_PROGRAM)
-    message(STATUS "[kagura] Build cache: ccache (${CCACHE_PROGRAM})")
-    set(CMAKE_C_COMPILER_LAUNCHER   "${CCACHE_PROGRAM}")
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-  else()
-    message(STATUS "[kagura] Build cache: not available (install ccache or sccache)")
-  endif()
-endif()
-# --------------------------------------------------------------------------
+include(KaguraOptions)          # every user-facing KAGURA_* option
+include(KaguraCompilerSetup)    # MSVC flags, ccache/sccache
+include(KaguraWindowsLLVMFixup) # prune stale absolute paths from LLVM exports
+include(KaguraInstall)          # install()/EXPORT rules
 
-# LLVM
+kagura_configure_compiler()
+kagura_configure_build_cache()
+
+# ---- LLVM --------------------------------------------------------------------
+
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -65,67 +29,24 @@ add_definitions(${LLVM_DEFINITIONS_LIST})
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
 
-# ---- Windows: prune stale absolute paths from LLVM's exported targets -------
-# The official clang+llvm Windows release bakes absolute paths from the machine
-# that built it into its exported link interfaces — most visibly the DIA SDK's
-# diaguids.lib under a Visual Studio 2019 install that exists nowhere else.
-# Linking anything against those components then fails at generate time with
-# "missing and no known rule to make it", before a single file is compiled.
-#
-# Drop link-interface entries naming an absolute path that does not exist.  If
-# one of them turns out to be genuinely needed, the link fails with an
-# unresolved symbol rather than a confusing missing-file error, and the STATUS
-# line below says exactly what was removed.
-if(WIN32)
-  foreach(_kagura_llvm_target IN LISTS LLVM_AVAILABLE_LIBS)
-    if(NOT TARGET ${_kagura_llvm_target})
-      continue()
-    endif()
-    get_target_property(_kagura_link_libs ${_kagura_llvm_target} INTERFACE_LINK_LIBRARIES)
-    if(NOT _kagura_link_libs)
-      continue()
-    endif()
-    set(_kagura_kept_libs "")
-    foreach(_kagura_lib IN LISTS _kagura_link_libs)
-      if(IS_ABSOLUTE "${_kagura_lib}" AND NOT EXISTS "${_kagura_lib}")
-        message(STATUS "[kagura] ${_kagura_llvm_target}: dropping missing link dependency ${_kagura_lib}")
-      else()
-        list(APPEND _kagura_kept_libs "${_kagura_lib}")
-      endif()
-    endforeach()
-    set_target_properties(${_kagura_llvm_target} PROPERTIES
-      INTERFACE_LINK_LIBRARIES "${_kagura_kept_libs}")
-  endforeach()
-endif()
+kagura_prune_stale_llvm_link_paths()
 
-# Kagura includes
-include_directories(${CMAKE_SOURCE_DIR}/include)
-
-# ---- Incremental build support ----------------------------------------------
-# kagura-opt and the pass plugin both support incremental builds naturally
-# via CMake's dependency tracking.  The following options control additional
-# incremental-build optimisations:
+# ---- Kagura headers ----------------------------------------------------------
 #
-#   KAGURA_UNITY_BUILD=ON  — merge pass sources into unity build groups so
-#     that incremental rebuilds recompile fewer TUs when a header changes.
-#     Speeds up full rebuilds ~2x but slows incremental single-file changes.
-#
-#   KAGURA_PCH=ON  — enable precompiled header for LLVM headers (llvm/IR/*.h)
-#     which account for most of the include overhead per TU.
-option(KAGURA_UNITY_BUILD "Enable CMake unity build for the obfuscator plugin" OFF)
-option(KAGURA_PCH "Enable precompiled header for LLVM includes" ON)
+# PROJECT_SOURCE_DIR, not CMAKE_SOURCE_DIR: the latter points at the top-level
+# project, which is not this one when kagura is pulled in via
+# add_subdirectory() — the embedding that integration/cmake/kagura-toolchain.cmake
+# and samples/basic/ both encourage.
+include_directories(${PROJECT_SOURCE_DIR}/include)
 
 if(KAGURA_PCH)
   set(CMAKE_DISABLE_PRECOMPILE_HEADERS OFF)
 endif()
-# --------------------------------------------------------------------------
 
-# ---- Legacy pass manager compatibility --------------------------------------
-# When KAGURA_LEGACY_PM=ON, LegacyPlugin.cpp is compiled into the shared
-# library and registers all kagura passes with LLVM 14-16's legacy PM via
-# PassManagerBuilder extension points and RegisterPass<>.
-# Requires LLVM_VERSION_MAJOR <= 16; newer LLVMs removed the legacy PM APIs.
-option(KAGURA_LEGACY_PM "Build legacy pass manager shims (LLVM 14-16)" OFF)
+# ---- Legacy pass manager compatibility ---------------------------------------
+# LegacyPlugin.cpp registers the passes with LLVM 14-16's legacy PM via
+# PassManagerBuilder extension points and RegisterPass<>. Newer LLVM has
+# removed those APIs.
 if(KAGURA_LEGACY_PM)
   if(LLVM_VERSION_MAJOR GREATER 16)
     message(WARNING "[kagura] KAGURA_LEGACY_PM=ON but LLVM ${LLVM_VERSION_MAJOR} "
@@ -135,29 +56,17 @@ if(KAGURA_LEGACY_PM)
     message(STATUS "[kagura] Legacy PM shims enabled (LLVM ${LLVM_VERSION_MAJOR})")
   endif()
 endif()
-# --------------------------------------------------------------------------
 
-# ---- Bitcode input support --------------------------------------------------
-# When KAGURA_BITCODE_TOOLS=ON, build a small standalone tool (kagura-opt)
-# that wraps `opt` and auto-loads the kagura plugin, so users can run kagura
-# passes on .bc / .ll files without needing a full clang invocation.
-option(KAGURA_BITCODE_TOOLS "Build kagura-opt bitcode processing tool" OFF)
-# --------------------------------------------------------------------------
-
-# ---- Plugin linkage mode ----------------------------------------------------
+# ---- Plugin linkage mode -----------------------------------------------------
 # LLVM cannot build loadable pass modules everywhere — the MSVC-targeted
 # Windows tarball ships LLVM_ENABLE_PLUGINS=OFF, so `-fpass-plugin` and
-# `opt --load-pass-plugin` are both unavailable there.  On those platforms the
-# passes are built as a static library and linked directly into a driver tool
-# (kagura-opt), which calls getKaguraPluginInfo() instead of dlopen()ing a
-# module.
+# `opt --load-pass-plugin` are both unavailable there. On those platforms the
+# passes are built as a static library and linked directly into kagura-opt,
+# which calls getKaguraPluginInfo() rather than dlopen()ing a module.
 #
-# KAGURA_FORCE_STATIC_PLUGIN=ON selects that same path on a host where loadable
-# modules *are* available, so the Windows linkage can be exercised from macOS
-# and Linux CI without a Windows machine.
-option(KAGURA_FORCE_STATIC_PLUGIN
-       "Link the passes statically into kagura-opt even where loadable modules work" OFF)
-
+# Derived, not an option: named without the KAGURA_ user-option prefix would be
+# clearer still, but it is read from lib/, tests/ and tools/ and renaming it is
+# left for a separate change.
 if(LLVM_ENABLE_PLUGINS AND NOT KAGURA_FORCE_STATIC_PLUGIN)
   set(KAGURA_PLUGIN_STATIC OFF)
   message(STATUS "[kagura] Plugin linkage: loadable module (-fpass-plugin)")
@@ -165,22 +74,24 @@ else()
   set(KAGURA_PLUGIN_STATIC ON)
   message(STATUS "[kagura] Plugin linkage: static library (link into kagura-opt)")
 endif()
-# --------------------------------------------------------------------------
 
-# Passes (loaded as plugin via -fpass-plugin)
+# ---- Targets -----------------------------------------------------------------
+
+# Passes (loaded as a plugin via -fpass-plugin)
 add_subdirectory(lib)
 
-# Runtime library linked into target app
+# Runtime library linked into the protected application
 add_subdirectory(runtime)
 
-# Tests
-option(KAGURA_BUILD_TESTS "Build tests" ON)
+# Bitcode tools (kagura-opt). Configured before tests so the link smoke tests
+# can depend on the targets it defines.
+if(KAGURA_BITCODE_TOOLS)
+  add_subdirectory(tools)
+endif()
+
 if(KAGURA_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
 endif()
 
-# Bitcode tools (kagura-opt)
-if(KAGURA_BITCODE_TOOLS)
-  add_subdirectory(tools)
-endif()
+kagura_add_install_rules()

@@ -25,38 +25,23 @@ jobs:
           - runner: macos-14
             os-label: macos-arm64
             llvm: "21"
-            plugin-ext: dylib
-            runtime-prefix: lib
-            runtime-ext: a
 
           - runner: macos-14
             os-label: macos-arm64
             llvm: "22"
-            plugin-ext: dylib
-            runtime-prefix: lib
-            runtime-ext: a
 
           # ── Linux (x86_64) ────────────────────────────────────────────────
           - runner: ubuntu-22.04
             os-label: linux-x86_64
             llvm: "19"
-            plugin-ext: so
-            runtime-prefix: lib
-            runtime-ext: a
 
           - runner: ubuntu-22.04
             os-label: linux-x86_64
             llvm: "21"
-            plugin-ext: so
-            runtime-prefix: lib
-            runtime-ext: a
 
           - runner: ubuntu-22.04
             os-label: linux-x86_64
             llvm: "22"
-            plugin-ext: so
-            runtime-prefix: lib
-            runtime-ext: a
 
     steps:
       - uses: actions/checkout@v4
@@ -121,32 +106,31 @@ jobs:
       #
       # Bundle layout per platform+llvm:
       #   kagura-<version>-<os-label>-llvm<llvm>.tar.gz
-      #     ├── plugin/    KaguraObfuscator.{dylib,so}
-      #     ├── runtime/   libkagura_runtime.a
-      #     └── include/   kagura/*.h
+      #     ├── lib/            KaguraObfuscator.{dylib,so}, libkagura_runtime.a
+      #     ├── include/kagura/ *.h
+      #     ├── bin/            kagura-opt (when built)
+      #     └── share/kagura/   profiles/*.json
       #
+      # This used to hand-copy build-tree paths, which required the
+      # plugin-ext / runtime-prefix / runtime-ext matrix entries purely to
+      # spell the filenames per platform, and silently shipped nothing when a
+      # path moved. The project now has install() rules, so CMake decides the
+      # layout and naming.
       - name: Stage artefacts
         id: stage
         run: |
           VERSION="${{ github.event.release.tag_name || github.event.inputs.tag }}"
           BUNDLE="kagura-${VERSION}-${{ matrix.os-label }}-llvm${{ matrix.llvm }}"
-          BUNDLE_DIR="${BUNDLE}"
 
-          mkdir -p "${BUNDLE_DIR}/plugin" "${BUNDLE_DIR}/runtime" "${BUNDLE_DIR}/include"
+          cmake --install build --prefix "${BUNDLE}"
 
-          # Plugin
-          cp build/lib/Transforms/KaguraObfuscator.${{ matrix.plugin-ext }} \
-             "${BUNDLE_DIR}/plugin/"
+          # Fail loudly rather than shipping an empty archive.
+          test -n "$(find "${BUNDLE}" -name 'KaguraObfuscator.*' -print -quit)" \
+            || { echo "::error::plugin missing from install tree"; exit 1; }
+          test -f "${BUNDLE}/lib/libkagura_runtime.a" \
+            || { echo "::error::runtime missing from install tree"; exit 1; }
 
-          # Runtime static library
-          cp build/runtime/${{ matrix.runtime-prefix }}kagura_runtime.${{ matrix.runtime-ext }} \
-             "${BUNDLE_DIR}/runtime/"
-
-          # Public headers
-          cp -r include/kagura "${BUNDLE_DIR}/include/"
-
-          # Create archive
-          tar -czf "${BUNDLE}.tar.gz" "${BUNDLE_DIR}"
+          tar -czf "${BUNDLE}.tar.gz" "${BUNDLE}"
           echo "bundle=${BUNDLE}.tar.gz" >> $GITHUB_OUTPUT
           echo "bundle_name=${BUNDLE}.tar.gz" >> $GITHUB_OUTPUT
 

@@ -87,7 +87,7 @@ else()
 endif()
 
 target_include_directories(KaguraObfuscator PRIVATE
-  ${CMAKE_SOURCE_DIR}/include
+  ${PROJECT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

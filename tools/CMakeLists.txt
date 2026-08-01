@@ -56,7 +56,7 @@ if(KAGURA_PLUGIN_STATIC)
 endif()
 
 target_include_directories(kagura-opt PRIVATE
-  ${CMAKE_SOURCE_DIR}/include
+  ${PROJECT_SOURCE_DIR}/include
   ${LLVM_INCLUDE_DIRS}
 )
 

@@ -36,6 +36,15 @@ jobs:
           brew install llvm@${{ matrix.llvm }}
           echo "LLVM_PREFIX=$(brew --prefix llvm@${{ matrix.llvm }})" >> $GITHUB_ENV
 
+      # lit drives the FileCheck suite. It is not part of the Homebrew LLVM
+      # bottle, and without it tests/CMakeLists.txt silently skips 29 tests
+      # with a STATUS message while the job stays green — which is how those
+      # tests went years without ever running.
+      - name: Install lit
+        run: |
+          python3 -m pip install --break-system-packages --quiet lit
+          lit --version
+
       - name: Configure
         run: |
           cmake -B build \
@@ -46,6 +55,15 @@ jobs:
             -DCMAKE_CXX_COMPILER="$LLVM_PREFIX/bin/clang++" \
             -DKAGURA_BUILD_TESTS=ON \
             -DKAGURA_BITCODE_TOOLS=OFF
+
+      # Fail rather than skip: a silently-skipped suite is worse than no suite.
+      # If lit or FileCheck goes missing, tests/CMakeLists.txt just prints a
+      # STATUS line and moves on, so the only reliable signal is whether the
+      # test got registered at all.
+      - name: Verify the lit suite is wired up
+        run: |
+          ctest --test-dir build -N | grep -q 'lit-filecheck' \
+            || { echo "::error::lit-filecheck was not registered — lit or FileCheck missing"; exit 1; }
 
       - name: Build
         run: cmake --build build -- -j$(sysctl -n hw.logicalcpu)
