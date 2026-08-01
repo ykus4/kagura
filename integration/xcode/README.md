@@ -70,22 +70,26 @@ ls -lh build/lib/Transforms/KaguraObfuscator.dylib
    Configurations → Release → expand your target →
    set "Based on Configuration File" to `kagura`.
 
-3. **Set `KAGURA_PLUGIN_PATH`.**
+3. **Set `KAGURA_ROOT`.**
    In Build Settings, add a User-Defined Setting:
 
    | Key | Value |
    |-----|-------|
-   | `KAGURA_PLUGIN_PATH` | `$(SRCROOT)/../kagura/build/lib/Transforms/KaguraObfuscator.dylib` |
+   | `KAGURA_ROOT` | `$(SRCROOT)/../kagura` |
 
    Adjust the relative path to match the location of the kagura checkout
-   relative to your `.xcodeproj` file.
+   relative to your `.xcodeproj` file. `kagura-flags.sh` probes
+   `$(KAGURA_ROOT)/build/lib/Transforms/KaguraObfuscator.{dylib,so,dll}`.
+   Set `KAGURA_PLUGIN_PATH` to an absolute plugin path to skip the probe.
 
-4. **Add the validation build phase** (optional but recommended).
+4. **Pick a profile.**
+   `KAGURA_PROFILE = fast | balanced | strong | off` (default `balanced`),
+   or an absolute path to your own JSON policy file.
+
+5. **Add the validation build phase** (optional but recommended).
    See [Build Phase Script](#build-phase-script).
 
-5. **Archive or build for Release.**
-   kagura flags are active only when the KAGURA_* toggles are set to `1` in
-   the xcconfig.
+6. **Archive or build for Release.**
 
 ---
 
@@ -93,44 +97,59 @@ ls -lh build/lib/Transforms/KaguraObfuscator.dylib
 
 The following settings are available in `kagura.xcconfig`.
 
-### Plugin Path
+### Plugin location
 
 ```xcconfig
-KAGURA_PLUGIN_PATH = $(SRCROOT)/../kagura/build/lib/Transforms/KaguraObfuscator.dylib
+KAGURA_ROOT = $(SRCROOT)/../kagura
+KAGURA_PLUGIN_PATH =            // optional: absolute path, skips the probe
 ```
 
-Override this in a machine-local `.xcconfig` that you do not commit to source
-control, or via a User-Defined build setting in the target.
+`kagura-flags.sh` probes `$(KAGURA_ROOT)/build/lib/Transforms/` for
+`KaguraObfuscator.dylib`, `.so` and `.dll`, in that order. Override
+`KAGURA_PLUGIN_PATH` in a machine-local `.xcconfig` that you do not commit to
+source control, or via a User-Defined build setting in the target.
 
-### Feature Toggles
+### Profile
 
-| Setting | Default | Pass |
-|---------|---------|------|
-| `KAGURA_ENABLE_STR` | `1` | StringEncryption — XOR-encrypts string literals |
-| `KAGURA_ENABLE_STR_AES` | `0` | StringEncryptionAES — AES-128-CTR string encryption (requires runtime) |
-| `KAGURA_ENABLE_WSTR` | `1` | WideStringEncryption — encrypts wide strings and CFString buffers |
-| `KAGURA_ENABLE_FLA` | `1` | ControlFlowFlattening — switch-based state machine |
-| `KAGURA_ENABLE_BCF` | `1` | BogusControlFlow — MBA opaque predicates |
-| `KAGURA_ENABLE_SUB` | `1` | Substitution — MBA arithmetic replacements |
-| `KAGURA_ENABLE_CO` | `0` | ConstantObfuscation — replaces integer constants |
-| `KAGURA_ENABLE_GENC` | `0` | GlobalEncryption — XOR-encrypts private integer globals |
-| `KAGURA_ENABLE_MVO` | `0` | MemoryValueObfuscation — XOR-encrypts alloca'd integer locals |
-| `KAGURA_ENABLE_OBJC` | `1` | ObjCObfuscation — selector/class name obfuscation |
-| `KAGURA_ENABLE_HONEY` | `0` | HoneyValue — decoy globals and fake security-stub functions |
-| `KAGURA_ENABLE_ANTIDEB` | `1` | AntiDebug — ptrace/Frida/port-27042 checks |
-| `KAGURA_ENABLE_TAMPER` | `1` | AntiTamper — FNV-1a integrity + jailbreak detection |
-| `KAGURA_ENABLE_METRICS` | `0` | ObfuscationMetrics — stderr diagnostic output |
-| `KAGURA_ENABLE_SYMMAP` | `0` | SymbolMap — emit JSON symbol map for crash symbolication |
-| `KAGURA_DWARF` | `keep` | DWARF handling: `keep` / `strip` / `obfuscate` |
+```xcconfig
+KAGURA_PROFILE = balanced       // fast | balanced | strong | off | <path.json>
+```
 
-### Tuning Parameters
+The pass set for each profile is **not** defined in this integration. It lives
+in [`integration/profiles/<name>.json`](../profiles/README.md), the single
+source of truth shared by all kagura integrations. `kagura-flags.sh` emits
+both `-mllvm -kagura-config=<json>` and the flag list expanded from that same
+JSON, so the build is configured identically whether or not the
+`kagura-config` pass takes effect.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `KAGURA_BCF_PROB` | `30` | Probability (0–100) of inserting bogus CF per BB |
-| `KAGURA_BCF_ITER` | `1` | Number of BCF iterations |
-| `KAGURA_SUB_ITER` | `1` | Number of substitution iterations |
-| `KAGURA_SEED` | *(unset)* | PRNG seed — set for reproducible obfuscation |
+### Per-pass overrides
+
+Every setting below is **empty by default** — the profile decides. Setting one
+switches `kagura-flags.sh` to the explicit-flag path: the profile is still
+expanded, your overrides are appended after it (last flag wins), and
+`-kagura-config` is dropped so the `kagura-config` pass cannot clobber them.
+
+| Setting | Pass |
+|---------|------|
+| `KAGURA_ENABLE_STR` | StringEncryption — XOR-encrypts string literals |
+| `KAGURA_ENABLE_FLA` | ControlFlowFlattening — switch-based state machine |
+| `KAGURA_ENABLE_BCF` | BogusControlFlow — MBA opaque predicates |
+| `KAGURA_ENABLE_SUB` | Substitution — MBA arithmetic replacements |
+| `KAGURA_ENABLE_CO` | ConstantObfuscation — replaces integer constants |
+| `KAGURA_ENABLE_OBJC` | ObjCObfuscation — selector/class name obfuscation (Apple-only; in no profile, on by default here) |
+| `KAGURA_ENABLE_ANTIDEB` | AntiDebug — ptrace/Frida/port-27042 checks |
+| `KAGURA_ENABLE_METRICS` | ObfuscationMetrics — stderr diagnostic output |
+
+### Tuning overrides
+
+| Setting | Description |
+|---------|-------------|
+| `KAGURA_BCF_PROB` | Probability (0–100) of inserting bogus CF per BB |
+| `KAGURA_BCF_ITER` | Number of BCF iterations |
+| `KAGURA_SUB_ITER` | Number of substitution iterations |
+| `KAGURA_SEED` | PRNG seed — set for reproducible obfuscation |
+
+All four are empty by default and fall back to the profile's `"tuning"` block.
 
 ---
 
@@ -353,9 +372,9 @@ Project → Info → Configurations → Debug → <your target> → None
 Project → Info → Configurations → Release → <your target> → kagura
 ```
 
-For CI pipelines that run tests against Release builds, consider using
-`KAGURA_ENABLE_FLA=0 KAGURA_ENABLE_BCF=0` to disable the most
-compile-time-expensive passes while keeping string encryption active.
+For CI pipelines that run tests against Release builds, use
+`KAGURA_PROFILE = fast`, which keeps string encryption active without the
+compile-time-expensive CFG passes.
 
 ---
 
@@ -380,41 +399,26 @@ that codesign measures.
 
 The table below shows recommended flag combinations for three common scenarios.
 
-Alternatively, use the JSON config DSL (`-mllvm -kagura-config=kagura.json`) with a built-in profile:
+The authoritative FAST / BALANCED / STRONG pass sets are the JSON files in
+[`integration/profiles`](../profiles/README.md); read those rather than a table
+here, which is how the six copies of this list drifted apart in the first
+place. Select one with:
 
 ```xcconfig
-KAGURA_CONFIG_FLAG = -mllvm -kagura-config=$(SRCROOT)/kagura.json
+KAGURA_PROFILE = strong
+```
+
+or point at your own policy file:
+
+```xcconfig
+KAGURA_PROFILE = $(SRCROOT)/kagura.json
 ```
 
 ```json
-{ "profile": "BALANCED" }
+{ "profile": "BALANCED", "passes": { "vm": true } }
 ```
 
-Available profiles: `FAST`, `BALANCED`, `STRONG`.
-
-For manual tuning, the table below shows recommended flag combinations:
-
-| Pass flag | FAST | BALANCED | STRONG |
-|-----------|:----:|:--------:|:------:|
-| `-kagura-str` | YES | YES | YES |
-| `-kagura-wstr` | NO | YES | YES |
-| `-kagura-fla` | NO | YES | YES |
-| `-kagura-bcf` | NO | YES | YES |
-| `-kagura-bcf-prob` | — | 30 | 60 |
-| `-kagura-bcf-iter` | — | 1 | 2 |
-| `-kagura-sub` | NO | YES | YES |
-| `-kagura-sub-iter` | — | 1 | 2 |
-| `-kagura-co` | NO | NO | YES |
-| `-kagura-genc` | NO | YES | YES |
-| `-kagura-mvo` | NO | YES | YES |
-| `-kagura-objc` | YES | YES | YES |
-| `-kagura-anti-debug` | NO | YES | YES |
-| `-kagura-tamper` | NO | YES | YES |
-| `-kagura-honey` | NO | NO | YES |
-| `-kagura-vm` | NO | NO | selective |
-| `-kagura-ibr` | NO | NO | YES |
-| `-kagura-lt` | NO | YES | YES |
-| Estimated compile overhead | ~1.1× | ~2×–3× | ~5×–10× |
+Rough compile-time overhead: `fast` ~1.1×, `balanced` ~2–3×, `strong` ~5–10×.
 
 Notes:
 - "selective" for `-kagura-vm` means applying it only to the highest-value
@@ -440,6 +444,8 @@ the file exists.  Run the build phase script manually:
 KAGURA_PLUGIN_PATH=/your/path/KaguraObfuscator.dylib \
   ./integration/xcode/kagura-flags.sh
 ```
+
+(The script also works with `.so` and `.dll` plugins.)
 
 The output should start with `-fpass-plugin=...`.
 
