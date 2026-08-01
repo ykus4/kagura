@@ -5,6 +5,19 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# A bare `cmake -B build` used to produce a no-optimisation, no-NDEBUG build
+# that matched nothing anyone actually ships. Default to RelWithDebInfo, which
+# keeps assertions compiled out like the CI and release builds while staying
+# debuggable. Pass -DCMAKE_BUILD_TYPE=Debug to get assertions.
+get_property(_kagura_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT _kagura_multi_config AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
+      "Build type: Debug, Release, RelWithDebInfo or MinSizeRel" FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY
+               STRINGS Debug Release RelWithDebInfo MinSizeRel)
+  message(STATUS "[kagura] CMAKE_BUILD_TYPE not set — defaulting to RelWithDebInfo")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 include(KaguraOptions)          # every user-facing KAGURA_* option

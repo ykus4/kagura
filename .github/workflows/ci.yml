@@ -7,6 +7,53 @@ on:
     branches: [main]
 
 jobs:
+  # ---- Assertions build ---------------------------------------------------
+  # Every other job builds Release, which defines NDEBUG and compiles assert()
+  # out. Three real bugs lived behind those assertions: two APInt width
+  # overflows in the key generation for i8/i16 allocas and globals, and a VM
+  # register-map overflow that, with assertions disabled, silently emitted
+  # bytecode addressing past the end of VMState::regs[] and corrupted adjacent
+  # interpreter state at run time. None of them could ever fail a CI job.
+  #
+  # This job exists so that class of bug is caught. It does not need the full
+  # LLVM matrix — one configuration is enough to trip an assertion.
+  assertions:
+    name: Build & Test (assertions enabled)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 22
+        run: |
+          brew install llvm@22
+          echo "LLVM_PREFIX=$(brew --prefix llvm@22)" >> $GITHUB_ENV
+
+      - name: Install lit
+        run: python3 -m pip install --break-system-packages --quiet lit
+
+      - name: Configure (Debug — assertions on)
+        run: |
+          cmake -B build-assert \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
+            -DLLVM_DIR="$LLVM_PREFIX/lib/cmake/llvm" \
+            -DCMAKE_C_COMPILER="$LLVM_PREFIX/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$LLVM_PREFIX/bin/clang++" \
+            -DKAGURA_BUILD_TESTS=ON
+
+      - name: Confirm assertions really are enabled
+        run: |
+          if grep -q -- '-DNDEBUG' build-assert/lib/Transforms/CMakeFiles/KaguraObfuscator.dir/flags.make; then
+            echo "::error::NDEBUG is set — this job would not catch assertion failures"
+            exit 1
+          fi
+
+      - name: Build
+        run: cmake --build build-assert -- -j$(sysctl -n hw.logicalcpu)
+
+      - name: Test
+        run: ctest --test-dir build-assert --output-on-failure -j$(sysctl -n hw.logicalcpu)
+
   # ---- LLVM version matrix (macOS arm64) --------------------------------
   build:
     name: Build & Test (LLVM ${{ matrix.llvm }})
