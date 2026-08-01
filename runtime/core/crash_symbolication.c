@@ -72,12 +72,29 @@ typedef struct {
 } kagura_sym_entry_t;
 
 /*
- * These weak symbols are overridden by the kagura linker when -kagura-symmap
- * is active.  If not overridden they default to empty tables.
+ * Empty-table defaults, overridden by the strong definitions the kagura
+ * symbol-map emitter provides when -kagura-symmap is active.
+ *
+ * These must be weak DEFINITIONS, not weak extern declarations.  They used to
+ * be declared:
+ *
+ *     extern kagura_sym_entry_t __kagura_sym_table[] __attribute__((weak));
+ *
+ * with a comment claiming they "default to empty tables" if not overridden.
+ * That is true on ELF, where extern+weak yields a weak-undefined reference
+ * that resolves to 0, but NOT on Mach-O: Darwin turns all three into hard
+ * undefined symbols, so anything that pulls this object out of the archive
+ * fails to link.  No pass emits a call into this file, so the object is
+ * normally never pulled and the breakage stayed hidden - but it hits any
+ * application that calls the symbolication API directly, and any consumer
+ * that force-loads the archive, which is what SwiftPM does.
+ *
+ * A weak definition is still overridden by a strong one at link time, so the
+ * intended -kagura-symmap path is unaffected.
  */
-extern kagura_sym_entry_t __kagura_sym_table[] __attribute__((weak));
-extern uint32_t            __kagura_sym_count   __attribute__((weak));
-extern char                __kagura_sym_pool[]  __attribute__((weak));
+__attribute__((weak)) kagura_sym_entry_t __kagura_sym_table[1] = {{0, 0, 0}};
+__attribute__((weak)) uint32_t           __kagura_sym_count    = 0;
+__attribute__((weak)) char               __kagura_sym_pool[1]  = {0};
 
 static kagura_sym_entry_t *g_sym_table = NULL;
 static uint32_t            g_sym_count = 0;
@@ -86,12 +103,13 @@ static const char         *g_sym_pool  = NULL;
 /* ---- Symbol table init -------------------------------------------------- */
 
 void kagura_sym_init(void) {
-    if (&__kagura_sym_table != NULL && &__kagura_sym_count != NULL &&
-        &__kagura_sym_pool  != NULL) {
-        g_sym_table = __kagura_sym_table;
-        g_sym_count = __kagura_sym_count;
-        g_sym_pool  = __kagura_sym_pool;
-    }
+    /* No null guard: a weak definition always has an address, so the old
+     * `&__kagura_sym_table != NULL` test was a tautology even before this
+     * change.  The real "is there a table?" test is the count, which
+     * find_sym() already applies. */
+    g_sym_table = __kagura_sym_table;
+    g_sym_count = __kagura_sym_count;
+    g_sym_pool  = __kagura_sym_pool;
 }
 
 /* Module constructor: auto-init before main() */
