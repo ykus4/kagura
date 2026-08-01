@@ -140,9 +140,14 @@ void kagura_aes128_ctr_decrypt(const uint8_t *enc, uint32_t len,
 /* core/zero_buf.c */
 void kagura_zero_buf(void *ptr, uint32_t len);
 
-/* core/vm_interpreter.c */
+/* core/vm_interpreter.c — see include/kagura/VM.h for the bytecode contract.
+ * `pool` carries the link-time-relocated 64-bit constants (function and global
+ * addresses) the bytecode cannot embed literally; `key` is the per-function XOR
+ * key the interpreter applies as it fetches each byte. */
 uint64_t kagura_vm_execute(const uint8_t *bytecode, uint32_t bc_size,
-                           uint64_t *args, uint32_t nargs);
+                           const uint64_t *args, uint32_t nargs,
+                           const uint64_t *pool, uint32_t npool,
+                           uint64_t key);
 
 /* core/blob_integrity.c — emitted by StringEncryptionAES.cpp on every target */
 void kagura_check_blob_integrity(const uint8_t *blob, uint32_t len,
