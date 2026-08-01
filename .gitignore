@@ -7,6 +7,10 @@ build_*/
 .cache/
 Testing/
 
+# SwiftPM build output
+.build/
+.swiftpm/
+
 # Python virtualenvs
 # (these only stayed out of `git status` because virtualenv writes its own
 #  .venv/.gitignore containing "*" — be explicit)
