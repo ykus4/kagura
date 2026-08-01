@@ -100,18 +100,36 @@ public:
 class RegMap {
   std::map<Value *, uint8_t> Map;
   uint8_t Next = 0;
+  bool Exhausted = false;
 public:
   bool has(Value *V) const { return Map.count(V); }
 
+  /// Allocates a virtual register for V, saturating when they run out.
+  ///
+  /// The interpreter has vm::kNumRegs registers and no spill mechanism, so a
+  /// function with more virtualisable values than that cannot be lowered at
+  /// all.  This used to assert, which aborted assertions-enabled builds on any
+  /// large function — and, worse, in an NDEBUG build the assert vanished and
+  /// the mapper happily handed out indices past the end of VMState::regs[],
+  /// so the interpreter scribbled over adjacent state at run time.
+  ///
+  /// Now allocation stops at the limit and raises exhausted(); virtualize()
+  /// checks that and throws the bytecode away, leaving the function untouched.
   uint8_t get(Value *V) {
     auto It = Map.find(V);
     if (It != Map.end()) return It->second;
-    assert(Next < vm::kNumRegs && "out of virtual registers");
+    if (Next >= vm::kNumRegs) {
+      Exhausted = true;
+      return 0;
+    }
     Map[V] = Next;
     return Next++;
   }
 
   void set(Value *V, uint8_t R) { Map[V] = R; }
+
+  /// True if get() was asked for more registers than the VM has.
+  bool exhausted() const { return Exhausted; }
 };
 
 // ── Instruction lowering ─────────────────────────────────────────────────────
@@ -317,6 +335,12 @@ static std::vector<uint8_t> virtualize(Function &F) {
       E.emit8(vm::OP_NOP);
     }
   }
+
+  // The function needed more virtual registers than the interpreter has, so
+  // the bytecode emitted above aliases registers and would compute garbage.
+  // Discard it; the caller treats an empty result as "leave this one alone".
+  if (RM.exhausted())
+    return {};
 
   // Second pass: patch jump targets
   for (auto &[Slot, BB] : JmpPatches) {
