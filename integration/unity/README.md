@@ -14,7 +14,9 @@ Applies kagura obfuscation to Unity IL2CPP builds for Android and iOS.
    `Assets/Editor/` directory (create it if it doesn't exist).
 
 2. Open **Edit > Project Settings > Kagura Obfuscator** and set:
-   - **Plugin Path** — absolute path to `KaguraObfuscator.dylib` (macOS) or `.so` (Linux)
+   - **Kagura Root** — the kagura checkout (`kagura.root`). The plugin is
+     found by probing `<root>/build/lib/Transforms/KaguraObfuscator.{dylib,so,dll}`
+   - **Plugin Path** — optional; an absolute path that skips the probe
    - **Runtime Lib Path** — absolute path to `libkagura_runtime.a`
 
 3. Build your project normally.  kagura runs automatically as a post-build step.
@@ -27,7 +29,18 @@ All settings are stored in `EditorPrefs` and can be changed via the
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Release builds only | on | Skip obfuscation for Development builds |
-| Profile | `BALANCED` | Strength preset: `FAST` / `BALANCED` / `STRONG` (overrides individual toggles) |
+| Use Profile | on | Drive the pass set from the shared profile (recommended) |
+| Profile | `balanced` | `fast` / `balanced` / `strong` / `off`, or a path to your own JSON policy file |
+
+When **Use Profile** is on, the only obfuscation flag emitted is
+`-mllvm -kagura-config=<kagura>/integration/profiles/<profile>.json`. The pass
+set for each profile lives in [`integration/profiles`](https://github.com/ykus4/kagura/tree/main/integration/profiles),
+the single source of truth shared by every kagura integration — read those
+files rather than the table below, which only applies to the explicit-flag
+fallback path (**Use Profile** off, or the profile file missing).
+
+| Setting | Default | Description |
+|---------|---------|-------------|
 | CFG Flattening | on | `-kagura-fla` |
 | Bogus Control Flow | on | `-kagura-bcf` |
 | Substitution | on | `-kagura-sub` |

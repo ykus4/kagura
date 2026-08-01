@@ -65,9 +65,7 @@ static bool pointerAllocaEscapes(const AllocaInst *AI) {
 
 PreservedAnalyses PointerEncryptionPass::run(Function &F,
                                               FunctionAnalysisManager &) {
-  if (!kagura::opt::PE)
-    return PreservedAnalyses::all();
-  if (!shouldObfuscate(F, "pe", true))
+  if (!shouldObfuscate(F, "pe"))
     return PreservedAnalyses::all();
   // EH functions are allowed: the pointerAllocaEscapes() check already rejects
   // any alloca whose address flows into an invoke or otherwise escapes the

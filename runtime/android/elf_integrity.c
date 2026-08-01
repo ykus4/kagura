@@ -18,6 +18,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #if defined(__linux__) || defined(__ANDROID__)
 
 #include <elf.h>
@@ -28,14 +30,12 @@
 #include <string.h>
 #include <unistd.h>
 
-extern void kagura_tamper_detected(void);
-
 /* -------------------------------------------------------------------------
  * Check 1 + 2: ELF header magic and W+X PT_LOAD segments
  * ---------------------------------------------------------------------- */
 
 /* dl_iterate_phdr callback: returns 1 if a W+X PT_LOAD segment is found. */
-static int _kagura_elf_phdr_cb(struct dl_phdr_info *info,
+static int elf_phdr_cb(struct dl_phdr_info *info,
                                 size_t size, void *data) {
     (void)size;
     int *found = (int *)data;
@@ -54,7 +54,7 @@ static int _kagura_elf_phdr_cb(struct dl_phdr_info *info,
 }
 
 /* Check ELF header magic of the main executable. */
-static int _kagura_elf_header_corrupt(void) {
+static int elf_header_corrupt(void) {
     int fd = open("/proc/self/exe", O_RDONLY | O_CLOEXEC);
     if (fd < 0)
         return 0; /* can't open — not conclusive */
@@ -72,11 +72,11 @@ static int _kagura_elf_header_corrupt(void) {
 }
 
 int kagura_elf_tampered(void) {
-    if (_kagura_elf_header_corrupt())
+    if (elf_header_corrupt())
         return 1;
 
     int wx_segment = 0;
-    dl_iterate_phdr(_kagura_elf_phdr_cb, &wx_segment);
+    dl_iterate_phdr(elf_phdr_cb, &wx_segment);
     if (wx_segment)
         return 1;
 

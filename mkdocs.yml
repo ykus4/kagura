@@ -57,6 +57,29 @@ markdown_extensions:
 
 plugins:
   - search
+  # ── Translation fallback policy ─────────────────────────────────────────────
+  # docs_structure: suffix means docs/foo.md is English and docs/foo.ja.md is
+  # its Japanese sibling. When a .ja.md sibling does NOT exist,
+  # mkdocs-static-i18n falls back to the English page — the JA site still has
+  # every page, and the nav entry still shows the translated title from
+  # nav_translations below, but the body is English.
+  #
+  # That fallback is intentional: a Japanese nav label pointing at an English
+  # page is better than a missing page or an untranslated label, and it lets a
+  # translation be added later by simply dropping in the .ja.md file — no
+  # mkdocs.yml change required.
+  #
+  # Currently English-only (nav title is translated, body is not):
+  #   security-model.md
+  #   cookbook/index.md
+  #   cookbook/banking.md
+  #   cookbook/mobile-game.md
+  #   cookbook/sdk-vendor.md
+  #   cookbook/drm.md
+  #
+  # Keep this list up to date, or regenerate it with:
+  #   comm -23 <(cd docs && find . -name '*.md' ! -name '*.ja.md' | sort) \
+  #            <(cd docs && find . -name '*.ja.md' | sed 's/\.ja\.md$/.md/' | sort)
   - i18n:
       docs_structure: suffix
       languages:
@@ -67,6 +90,8 @@ plugins:
         - locale: ja
           name: 日本語
           build: true
+          # Titles here apply to every page, including the English-only pages
+          # listed in the fallback note above.
           nav_translations:
             Home: ホーム
             Getting Started: はじめに

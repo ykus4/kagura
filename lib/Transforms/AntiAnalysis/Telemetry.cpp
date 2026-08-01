@@ -34,20 +34,8 @@ using namespace llvm;
 
 namespace kagura {
 
-// Compute a stable 32-bit FNV-1a hash of a string for use as the event ID.
-static uint32_t fnv1a32_str(StringRef S) {
-  uint32_t h = 0x811c9dc5u;
-  for (char c : S) {
-    h ^= static_cast<uint8_t>(c);
-    h *= 0x01000193u;
-  }
-  return h;
-}
-
 PreservedAnalyses TelemetryPass::run(Function &F, FunctionAnalysisManager &) {
-  if (!kagura::opt::Telemetry)
-    return PreservedAnalyses::all();
-  if (!shouldObfuscate(F, "telemetry", true))
+  if (!shouldObfuscate(F, "telemetry"))
     return PreservedAnalyses::all();
   if (F.isDeclaration())
     return PreservedAnalyses::all();
@@ -62,7 +50,7 @@ PreservedAnalyses TelemetryPass::run(Function &F, FunctionAnalysisManager &) {
   FunctionCallee TelFn = M.getOrInsertFunction("kagura_telemetry_event", FTy);
 
   // Compute event ID from function name
-  uint32_t EventID = fnv1a32_str(F.getName());
+  uint32_t EventID = fnv1a32(F.getName());
 
   // Insert call at function entry (after alloca block, first non-alloca point)
   BasicBlock &Entry = F.getEntryBlock();

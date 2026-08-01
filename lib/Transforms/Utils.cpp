@@ -9,10 +9,13 @@
 #endif
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 
 using namespace llvm;
 
@@ -21,6 +24,15 @@ namespace kagura {
 // ---- Annotation helpers ----
 
 bool hasAnnotation(Function &F, StringRef Attr) {
+  // Function metadata, written by AutoSelectPass. Checked first because it is
+  // far cheaper than walking llvm.global.annotations, and because AutoSelect
+  // runs before every pass that queries this.
+  //
+  // AutoSelect used to write this metadata while nothing ever read it, which
+  // made the entire pass a no-op.
+  if (F.hasMetadata(Attr))
+    return true;
+
   Module *M = F.getParent();
   GlobalVariable *GA =
       M->getGlobalVariable("llvm.global.annotations");
@@ -48,6 +60,63 @@ bool hasAnnotation(Function &F, StringRef Attr) {
       return true;
   }
   return false;
+}
+
+// ---- Kagura-generated symbol recognition ----------------------------------
+
+bool isKaguraSymbol(StringRef Name) {
+  // Every prefix any kagura pass emits. Keep in sync when adding a pass that
+  // creates new globals or helper functions; a missing entry means later
+  // passes re-obfuscate our own helpers and SymbolMap reports them as user
+  // symbols.
+  static constexpr StringRef Prefixes[] = {
+      "kagura_",   // runtime calls, decrypt stubs, keys, flags, honey values
+      "__kagura",  // CallIndirection thunk table, StringSplit initialisers
+      "__kg_",     // FunctionSplit outlined helpers
+      "kagura.",   // EncryptedLookupTable and ControlFlowFlattening globals
+  };
+  for (StringRef P : Prefixes)
+    if (Name.starts_with(P))
+      return true;
+  return false;
+}
+
+// ---- Hashing --------------------------------------------------------------
+
+// FNV-1a parameters. Mirrored in runtime/core/hash.c — the runtime recomputes
+// hashes that these produce at compile time, so the two must agree exactly.
+static constexpr uint32_t kFnv1a32Offset = 0x811c9dc5u;
+static constexpr uint32_t kFnv1a32Prime  = 0x01000193u;
+static constexpr uint64_t kFnv1a64Offset = 0xcbf29ce484222325ULL;
+static constexpr uint64_t kFnv1a64Prime  = 0x100000001b3ULL;
+
+uint32_t fnv1a32(ArrayRef<uint8_t> Data) {
+  uint32_t H = kFnv1a32Offset;
+  for (uint8_t B : Data) {
+    H ^= B;
+    H *= kFnv1a32Prime;
+  }
+  return H;
+}
+
+uint32_t fnv1a32(StringRef S) {
+  return fnv1a32(ArrayRef<uint8_t>(
+      reinterpret_cast<const uint8_t *>(S.data()), S.size()));
+}
+
+uint64_t fnv1a64(StringRef S) {
+  uint64_t H = kFnv1a64Offset;
+  for (char C : S) {
+    H ^= static_cast<uint8_t>(C);
+    H *= kFnv1a64Prime;
+  }
+  return H;
+}
+
+// ---- Module constructors --------------------------------------------------
+
+void appendKaguraCtor(Module &M, Function *Ctor, CtorPriority P) {
+  appendToGlobalCtors(M, Ctor, static_cast<int>(P));
 }
 
 // ---- List-matching helpers (4.6.3 / 4.6.4) --------------------------------
@@ -312,6 +381,86 @@ Function *createCtorFunction(Module &M, const Twine &Name) {
   auto *F = Function::Create(FTy, Function::InternalLinkage, Name, M);
   BasicBlock::Create(Ctx, "entry", F);
   return F;
+}
+
+// ---- Global-variable use analysis ----
+
+bool hasOnlyGuardableUses(const GlobalVariable *GV) {
+  for (const User *U : GV->users()) {
+    if (isa<PHINode>(U))
+      return false;
+    if (isa<Instruction>(U))
+      continue;
+    if (isa<ConstantExpr>(U)) {
+      for (const User *Nested : U->users()) {
+        if (!isa<Instruction>(Nested) || isa<PHINode>(Nested))
+          return false;
+      }
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+// ---- Lazy-decrypt guard ----
+
+void emitLazyGuard(Instruction *InsertBefore, GlobalVariable *FlagGV,
+                   Function *DecryptStub, StringRef BBPrefix) {
+  Function *ParentF = InsertBefore->getFunction();
+  LLVMContext &Ctx  = ParentF->getContext();
+  auto *Int8Ty      = Type::getInt8Ty(Ctx);
+
+  // Split at InsertBefore so we get
+  //   CheckBB --(flag == 0)--> DecryptBB --> MergeBB
+  //           --(flag != 0)-------------> MergeBB
+  BasicBlock *CheckBB = InsertBefore->getParent();
+  BasicBlock *MergeBB =
+      CheckBB->splitBasicBlock(InsertBefore, BBPrefix + ".merge");
+  BasicBlock *DecryptBB =
+      BasicBlock::Create(Ctx, BBPrefix + ".decrypt", ParentF, MergeBB);
+
+  // splitBasicBlock leaves an unconditional branch behind; replace it with the
+  // flag test.
+  CheckBB->getTerminator()->eraseFromParent();
+
+  IRBuilder<> B(CheckBB);
+  Value *Flag   = B.CreateLoad(Int8Ty, FlagGV, BBPrefix + ".flag");
+  Value *IsZero = B.CreateICmpEQ(Flag, ConstantInt::get(Int8Ty, 0));
+  B.CreateCondBr(IsZero, DecryptBB, MergeBB);
+
+  IRBuilder<> DB(DecryptBB);
+  DB.CreateCall(DecryptStub);
+  DB.CreateStore(ConstantInt::get(Int8Ty, 1), FlagGV);
+  DB.CreateBr(MergeBB);
+}
+
+// ---- Call rewriting ----
+
+CallInst *replaceCalleeWith(CallInst *CI, FunctionType *FTy, Value *NewCallee) {
+  SmallVector<Value *, 8> Args(CI->args());
+  SmallVector<OperandBundleDef, 2> Bundles;
+  CI->getOperandBundlesAsDefs(Bundles);
+
+  IRBuilder<> B(CI);
+  CallInst *NewCI = B.CreateCall(FTy, NewCallee, Args, Bundles);
+
+  NewCI->setCallingConv(CI->getCallingConv());
+  NewCI->setAttributes(CI->getAttributes());
+  NewCI->setTailCallKind(CI->getTailCallKind());
+  NewCI->setDebugLoc(CI->getDebugLoc());
+  // Only meaningful on floating-point calls, but harmless otherwise — and
+  // omitting it is precisely the drift this helper exists to prevent.
+  if (isa<FPMathOperator>(NewCI))
+    NewCI->copyFastMathFlags(CI);
+
+  CI->replaceAllUsesWith(NewCI);
+  CI->eraseFromParent();
+  return NewCI;
+}
+
+void replaceAllUsesExcept(Value *Old, Instruction *New) {
+  Old->replaceUsesWithIf(New, [&](Use &U) { return U.getUser() != New; });
 }
 
 // ---- String global collection ----

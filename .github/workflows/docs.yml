@@ -40,7 +40,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install mkdocs-material pymdown-extensions mkdocs-static-i18n
+        run: pip install -r docs/requirements.txt
 
       - name: Build (strict)
         run: mkdocs build --strict

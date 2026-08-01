@@ -30,6 +30,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __ANDROID__
 
 #include <stdint.h>
@@ -193,8 +195,6 @@ int kagura_attestation_ok(JNIEnv *env, const char *response_b64url,
 
     int result;
     if (is_play_integrity) {
-        /* Forward declaration from play_integrity.c */
-        extern int kagura_play_integrity_verdict_ok(const char *);
         result = kagura_play_integrity_verdict_ok(response_b64url);
     } else {
         result = kagura_safetynet_verdict_ok(response_b64url, nonce);

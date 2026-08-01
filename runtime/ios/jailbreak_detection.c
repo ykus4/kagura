@@ -27,6 +27,8 @@
  *         -c runtime/jailbreak_detection.c
  */
 
+#include "../internal.h"
+
 #include <dlfcn.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -35,19 +37,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#if defined(__APPLE__)
-#  include <TargetConditionals.h>
-#endif
-
 /* -------------------------------------------------------------------------
  * Helper: file-existence probe
  * ---------------------------------------------------------------------- */
 
-/** Returns 1 if the given path exists (stat succeeds), 0 otherwise. */
-static int path_exists(const char *path) {
-    struct stat st;
-    return (stat(path, &st) == 0) ? 1 : 0;
-}
+/* Shared probe from core/pathprobe.c.  The hardened variant asks stat, access
+ * and open rather than stat alone: jailbreak hiders routinely hook exactly one
+ * of the three. */
+#define path_exists(p) kagura_path_exists_hardened(p)
 
 /* =========================================================================
  * iOS / macOS jailbreak detection
@@ -114,41 +111,9 @@ int kagura_check_cydia_path(void) {
  * Returns 1 if a suspicious dylib is found, 0 otherwise.
  */
 int kagura_check_substrate_dylib(void) {
-    /* Weak-link the dyld APIs so we can handle the case where they are absent
-     * (e.g., when running under a simulator build of the runtime). */
-    extern int          _dyld_image_count(void)
-        __attribute__((weak_import));
-    extern const char * _dyld_get_image_name(unsigned int image_index)
-        __attribute__((weak_import));
-
-    static const char *SuspiciousLibs[] = {
-        "MobileSubstrate",
-        "CydiaSubstrate",
-        "FridaGadget",
-        "frida-gadget",
-        "frida-agent",
-        "cynject",
-        "libhooker",
-        "SubstrateLoader",
-        "cycript",
-        "SSLKillSwitch",
-        NULL
-    };
-
-    if (!_dyld_image_count || !_dyld_get_image_name)
-        return 0;
-
-    int count = _dyld_image_count();
-    for (int i = 0; i < count; ++i) {
-        const char *name = _dyld_get_image_name((unsigned int)i);
-        if (!name)
-            continue;
-        for (int j = 0; SuspiciousLibs[j] != NULL; ++j) {
-            if (strstr(name, SuspiciousLibs[j]))
-                return 1;
-        }
-    }
-    return 0;
+    /* The ten-name local list is superseded by the union table in
+     * core/imagelist.c, which also folds case. */
+    return kagura_image_list_contains(kagura_suspicious_image_patterns());
 }
 
 /* --- Check 3: Sandbox escape via write probe ---------------------------- */
@@ -400,43 +365,13 @@ int kagura_jailbreak_detected(void) {
  * Tamper response
  * ====================================================================== */
 
-/**
- * kagura_tamper_detected
- *
- * Called by kagura_runtime_hash_check() and by user code when a tamper
- * condition is confirmed.  The response strategy is layered:
- *
- *   1. Spin in an infinite sleep loop.  This causes the app to appear to
- *      hang rather than crash, making it harder to pinpoint the detection
- *      site via crash dumps.  The loop also keeps the process alive so that
- *      any reverse-engineering session attached to it is kept busy.
- *
- *   2. If the platform sleep API is somehow patched the loop body also calls
- *      abort() to guarantee termination.
- *
- * The function is marked __attribute__((noreturn)) so the compiler knows it
- * never returns and can emit appropriate code at call sites.
- *
- * Users may override the default behaviour by providing their own definition
- * of kagura_tamper_detected with __attribute__((constructor)) priority or by
- * interposing the symbol at link time.
+/*
+ * kagura_tamper_detected used to be defined here.  It has moved to
+ * runtime/core/tamper_response.c: this is an Apple-only file, so any
+ * Android or Windows link that pulled in one of the nine other callers
+ * (elf_integrity.c, apk_integrity.c, ...) but not this file ended up with
+ * an undefined symbol.
  */
-__attribute__((noreturn, noinline))
-void kagura_tamper_detected(void) {
-    /*
-     * Spin-sleep strategy: sleep for a very large value and loop.
-     * On most UNIX systems sleep() can be interrupted by a signal; the loop
-     * ensures we re-enter sleep even if woken prematurely.
-     */
-    for (;;) {
-        sleep(999999u);
-        /*
-         * Reaching here means sleep returned early (signal delivery or a
-         * patched sleep).  Fall back to abort() to ensure we never continue.
-         */
-        abort();
-    }
-}
 
 /* =========================================================================
  * Self-check entry point
@@ -464,10 +399,12 @@ void kagura_self_check(void) {
  * ====================================================================== */
 
 /*
- * FNV-1a 32-bit constants — must match AntiTamper.cpp exactly.
+ * FNV-1a 32-bit offset basis — must match AntiTamper.cpp exactly.  Used below
+ * only as a mixing constant for the guard tag; the hash itself lives in
+ * core/hash.c.  KAGURA_FNV1A_PRIME used to be defined here too and was never
+ * referenced.
  */
 #define KAGURA_FNV1A_OFFSET_BASIS UINT32_C(0x811c9dc5)
-#define KAGURA_FNV1A_PRIME        UINT32_C(0x01000193)
 
 /**
  * kagura_runtime_hash_check

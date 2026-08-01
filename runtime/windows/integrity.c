@@ -15,6 +15,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef _WIN32
 
 #include <stdint.h>
@@ -25,8 +27,6 @@
 #endif
 #include <windows.h>
 #include <imagehlp.h>   /* MapFileAndCheckSum */
-
-extern void kagura_on_tamper_detected(void);
 
 /* ---- PE optional-header checksum verification ---------------------------- */
 /*

@@ -181,7 +181,7 @@ static void buildHoneyAnchorCtor(
   (void)PtrTy;
   B.CreateRetVoid();
 
-  appendToGlobalCtors(M, Ctor, /*Priority=*/65535); // very low priority
+  appendKaguraCtor(M, Ctor, CtorPriority::Honey);
 }
 
 // ---- Pass entry point -------------------------------------------------------

@@ -54,7 +54,7 @@ namespace kagura {
 
 PreservedAnalyses BasicBlockSplittingPass::run(Function &F,
                                                FunctionAnalysisManager &AM) {
-  if (!shouldObfuscate(F, "bbs", kagura::opt::BBS))
+  if (!shouldObfuscate(F, "bbs"))
     return PreservedAnalyses::all();
   if (F.isDeclaration())
     return PreservedAnalyses::all();

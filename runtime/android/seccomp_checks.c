@@ -28,14 +28,14 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #if defined(__linux__) || defined(__ANDROID__)
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/prctl.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* PR_GET_SECCOMP — returns 0 if not active, 1 if strict, 2 if filter */
 int kagura_seccomp_active(void) {

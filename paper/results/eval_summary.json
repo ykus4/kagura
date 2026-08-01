@@ -1,0 +1,113 @@
+{
+  "plain": {
+    "size": 33800,
+    "instructions": 217,
+    "size_oh": 1.0,
+    "instr_oh": 1.0,
+    "passes": [],
+    "cost": {
+      "active_passes": [
+        "str",
+        "sub",
+        "bcf",
+        "ibr",
+        "bbr"
+      ],
+      "estimated_bb_count": 8,
+      "base_cost_hours": 0.67,
+      "cost_multiplier": 168.6,
+      "total_cost_hours": 112.4,
+      "confidence": "high",
+      "verdict": "HIGH_COST"
+    },
+    "angr": {
+      "error": "Command '['/Users/yoshiki.kusama/Personal/kagura/.venv/bin/python3', './tests/symbolic_exec/run_angr_eval.py', '--binary', '/Users/yoshiki.kusama/Personal/kagura/paper/benchmarks/../results/game_plain_elf', '--timeout', '30', '--entry', 'eval_verify_score']' returned non-zero exit status 1."
+    }
+  },
+  "balanced": {
+    "size": 33808,
+    "instructions": 365,
+    "size_oh": 1.0,
+    "instr_oh": 1.68,
+    "passes": [
+      "str",
+      "bcf",
+      "fla",
+      "sub",
+      "co"
+    ],
+    "cost": {
+      "active_passes": [
+        "str",
+        "bcf",
+        "fla",
+        "sub",
+        "co"
+      ],
+      "estimated_bb_count": 8,
+      "base_cost_hours": 0.67,
+      "cost_multiplier": 1110.8,
+      "total_cost_hours": 740.6,
+      "confidence": "high",
+      "verdict": "VERY_HIGH_COST"
+    },
+    "angr": {
+      "binary": "/Users/yoshiki.kusama/Personal/kagura/paper/benchmarks/../results/game_balanced_elf",
+      "entry": "eval_verify_score",
+      "timeout": 30,
+      "instr_count": 35,
+      "branch_count": 2,
+      "paths_explored": 3,
+      "time_elapsed": 0.6,
+      "timed_out": false,
+      "verdict": "PARTIAL"
+    }
+  },
+  "strong": {
+    "size": 33800,
+    "instructions": 403,
+    "size_oh": 1.0,
+    "instr_oh": 1.86,
+    "passes": [
+      "str",
+      "bcf",
+      "fla",
+      "sub",
+      "co",
+      "mvo",
+      "ibr",
+      "bbs",
+      "bbr"
+    ],
+    "cost": {
+      "active_passes": [
+        "str",
+        "bcf",
+        "fla",
+        "sub",
+        "co",
+        "mvo",
+        "ibr",
+        "bbs",
+        "bbr"
+      ],
+      "estimated_bb_count": 8,
+      "base_cost_hours": 0.67,
+      "cost_multiplier": 54865.9,
+      "total_cost_hours": 36577.3,
+      "confidence": "high",
+      "verdict": "VERY_HIGH_COST"
+    },
+    "angr": {
+      "binary": "/Users/yoshiki.kusama/Personal/kagura/paper/benchmarks/../results/game_strong_elf",
+      "entry": "eval_verify_score",
+      "timeout": 30,
+      "instr_count": 43,
+      "branch_count": 2,
+      "paths_explored": 3,
+      "time_elapsed": 0.64,
+      "timed_out": false,
+      "verdict": "PARTIAL"
+    }
+  }
+}

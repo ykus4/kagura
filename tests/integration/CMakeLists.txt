@@ -23,7 +23,22 @@ set(INT_INPUTS ${CMAKE_CURRENT_SOURCE_DIR}/subjects)
 
 # PASSES is an opt -passes= pipeline string, e.g. "function(kagura-fla)" or
 # "kagura-str,function(kagura-fla,kagura-co)".
+#
+# Two optional trailing arguments:
+#   ARGV4  REQUIRE_IR — a regex the obfuscated IR must contain.  Pass it for any
+#          pass that can legitimately decline to transform a function, otherwise
+#          "output matches baseline" is satisfied by doing nothing at all.
+#   ARGV5  RUNTIME    — link the kagura runtime, for passes that emit calls into
+#          it (the VM interpreter, for instance).
 macro(kagura_add_integration_test TEST_NAME PASSES SOURCE_FILE EXPECTED_OUTPUT)
+  set(_require_ir "")
+  set(_runtime "")
+  if(${ARGC} GREATER 4)
+    set(_require_ir "${ARGV4}")
+  endif()
+  if(${ARGC} GREATER 5)
+    set(_runtime "${ARGV5}")
+  endif()
   add_test(NAME integration_${TEST_NAME}
     COMMAND ${CMAKE_COMMAND}
       -DCLANG=${LLVM_BIN}/clang
@@ -33,6 +48,8 @@ macro(kagura_add_integration_test TEST_NAME PASSES SOURCE_FILE EXPECTED_OUTPUT)
       -DSOURCE=${INT_INPUTS}/${SOURCE_FILE}
       -DEXPECTED=${EXPECTED_OUTPUT}
       -DTEST_NAME=${TEST_NAME}
+      -DREQUIRE_IR=${_require_ir}
+      -DRUNTIME=${_runtime}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/run_integration_test.cmake
   )
   set_tests_properties(integration_${TEST_NAME} PROPERTIES
@@ -100,3 +117,19 @@ kagura_add_integration_test(lt_correctness
   "function(kagura-lt)"
   loop_smoke.c
   "45\n550\n")
+
+# ---- Code virtualisation ----------------------------------------------------
+#
+# This is the one pass whose output is executed by an interpreter rather than by
+# the CPU, so nothing short of running the binary catches a bytecode/interpreter
+# disagreement.  Until this test existed, -kagura-vm produced a binary that hung
+# before its first line of output on every input, and no test noticed.
+#
+# REQUIRE_IR keeps the test honest: the pass declines any function it cannot
+# lower, so without it a pass that lowered nothing would still "match baseline".
+kagura_add_integration_test(vm_correctness
+  "function(kagura-vm)"
+  vm_smoke.c
+  ""
+  "kagura_vm_execute"
+  $<TARGET_FILE:kagura_runtime>)

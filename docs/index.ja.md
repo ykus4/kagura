@@ -1,5 +1,12 @@
 # Kagura
 
+> **`-mllvm` 経由のフラグは LLVM 22 が必要です。** LLVM 17–21 では、clang が
+> `-fpass-plugin` でプラグインを読み込む前に `-mllvm` を解析するため、すべての
+> `-kagura-*` フラグが *"Unknown command line argument"* で拒否されます。同梱の
+> `kagura-opt`、または `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`
+> を使ってください（どちらも全対応バージョンで動作します）。
+
+
 > **モバイル・デスクトップ・WebAssembly 向けの LLVM ベース難読化・耐タンパーツールキット。**
 
 LLVM 17+ の **New Pass Manager** 上に構築。`-fpass-plugin` でパスプラグインとしてロードされ、LLVM のソースツリーに手を加える必要はありません。

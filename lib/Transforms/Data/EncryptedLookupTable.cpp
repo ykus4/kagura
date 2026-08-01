@@ -100,8 +100,7 @@ static bool isLookupSwitch(SwitchInst *SI,
 
 PreservedAnalyses EncryptedLookupTablePass::run(Function &F,
                                                   FunctionAnalysisManager &) {
-  if (!kagura::opt::ELT) return PreservedAnalyses::all();
-  if (!shouldObfuscate(F, "elt", true)) return PreservedAnalyses::all();
+  if (!shouldObfuscate(F, "elt")) return PreservedAnalyses::all();
   if (F.isDeclaration()) return PreservedAnalyses::all();
   if (hasExceptionHandling(F)) return PreservedAnalyses::all();
 

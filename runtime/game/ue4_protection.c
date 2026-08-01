@@ -15,28 +15,18 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 
-extern void kagura_tamper_detected(void) __attribute__((noreturn));
-
 /* ── Internal helpers ────────────────────────────────────────────────────── */
 
-#define KAGURA_FNV1A_OFFSET_BASIS UINT32_C(0x811c9dc5)
-#define KAGURA_FNV1A_PRIME        UINT32_C(0x01000193)
-
-static uint32_t _ue4_fnv1a32(const void *data, size_t len) {
-    const uint8_t *p    = (const uint8_t *)data;
-    uint32_t       hash = KAGURA_FNV1A_OFFSET_BASIS;
-    for (size_t i = 0; i < len; ++i) {
-        hash ^= (uint32_t)p[i];
-        hash *= KAGURA_FNV1A_PRIME;
-    }
-    return hash;
-}
+/* FNV-1a-32 shared via core/hash.c. */
+#define ue4_fnv1a32(data, len) kagura_fnv1a32_buf((data), (len))
 
 /*
  * UE4 .pak file magic: little-endian u32 at the end-of-central-directory
@@ -205,66 +195,34 @@ void kagura_ue4_protect_function_table(void *vtable, size_t count) {
  *   iOS/macOS    : loaded dylib scan via _dyld_get_image_name
  * ====================================================================== */
 
-#if defined(__ANDROID__) || defined(__linux__)
-
-static int _ue4_check_maps(void) {
-    static const char *Patterns[] = {
-        /* General hook frameworks */
-        "frida-agent", "frida-gadget", "libsubstrate", "libdobby",
-        /* UE4-specific mod loaders and cheat tools */
-        "UE4SS",
-        "MirrorHook",
-        "UnrealCheats",
-        "libUEHook",
-        /* Memory scanner / cheat engine */
-        "libGameGuardian", "GameGuardian",
-        NULL
-    };
-
-    FILE *f = fopen("/proc/self/maps", "r");
-    if (!f) return 0;
-
-    char line[512];
-    while (fgets(line, (int)sizeof(line), f)) {
-        for (int i = 0; Patterns[i] != NULL; ++i) {
-            if (strstr(line, Patterns[i])) { fclose(f); return 1; }
-        }
-    }
-    fclose(f);
-    return 0;
-}
-
-#endif /* __ANDROID__ || __linux__ */
+/*
+ * UE4-specific mod loaders and memory editors.  These stay local rather than
+ * joining the shared table in core/imagelist.c: they are only meaningful for
+ * an Unreal title, and the generic frameworks they used to list alongside
+ * ("frida-agent", "libsubstrate", "libdobby", ...) are in the shared table
+ * already, so this check is now a strict superset of what it matched before.
+ */
+static const char *const kUE4CheatTools[] = {
+    "UE4SS",
+    "MirrorHook",
+    "UnrealCheats",
+    "libUEHook",
+    "GameGuardian",
+    "libGameGuardian",
+    NULL
+};
 
 int kagura_ue4_anti_memory_scan(void) {
-#if defined(__ANDROID__) || defined(__linux__)
-    if (_ue4_check_maps()) return 1;
-#endif
+    /* Shared injection frameworks: dyld on Apple, dl_iterate_phdr plus
+     * /proc/self/maps on Linux/Android, module list on Windows. */
+    if (kagura_image_list_contains(kagura_suspicious_image_patterns()))
+        return 1;
 
-#if defined(__APPLE__)
-    {
-        extern int          _dyld_image_count(void)
-            __attribute__((weak_import));
-        extern const char * _dyld_get_image_name(unsigned int)
-            __attribute__((weak_import));
-
-        static const char *SuspiciousLibs[] = {
-            "frida", "dobby", "substrate",
-            "UE4SS", "MirrorHook", "UnrealCheats",
-            NULL
-        };
-
-        if (_dyld_image_count && _dyld_get_image_name) {
-            int n = _dyld_image_count();
-            for (int i = 0; i < n; ++i) {
-                const char *name = _dyld_get_image_name((unsigned int)i);
-                if (!name) continue;
-                for (int j = 0; SuspiciousLibs[j] != NULL; ++j)
-                    if (strstr(name, SuspiciousLibs[j])) return 1;
-            }
-        }
-    }
-#endif
+    /* UE4-specific tooling. */
+    if (kagura_image_list_contains(kUE4CheatTools))
+        return 1;
+    if (kagura_maps_contain(kUE4CheatTools))
+        return 1;
 
     return 0;
 }

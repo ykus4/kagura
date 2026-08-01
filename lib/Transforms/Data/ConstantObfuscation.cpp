@@ -16,6 +16,13 @@
 // Each constant is replaced with a randomly chosen identity.
 // Only replaces constants in user functions, not in kagura's own helpers.
 //
+// NOTE: every identity below is built from an operand that is itself a
+// constant, so the builder MUST NOT constant-fold.  The default IRBuilder<>
+// uses ConstantFolder, which evaluates e.g. (V ^ R) ^ R straight back to V and
+// hands the original ConstantInt back — setOperand() then stores the value that
+// was already there and the pass silently becomes a no-op.  IRBuilder<NoFolder>
+// emits the instructions verbatim, which is the whole point of the pass.
+//
 //===----------------------------------------------------------------------===//
 
 #include "kagura/Passes.h"
@@ -25,6 +32,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/NoFolder.h"
 
 using namespace llvm;
 
@@ -56,7 +64,7 @@ static bool obfuscateConstant(Instruction *I, unsigned OpIdx,
   if (Val == 0 || Val == ((Bits == 64) ? ~0ULL : (1ULL << Bits) - 1))
     return false;
 
-  IRBuilder<> B(I);
+  IRBuilder<NoFolder> B(I);
   Type *Ty = CI->getType();
 
   // Pick a random identity transformation
@@ -130,7 +138,7 @@ static bool obfuscateFPConstant(Instruction *I, unsigned OpIdx,
 
   uint64_t R = RNG.next() & ((Bits == 64) ? ~0ULL : 0xFFFFFFFFULL);
 
-  IRBuilder<> B(I);
+  IRBuilder<NoFolder> B(I);
   // Build: bitcast_fp( bitcast_int(FP_constant) ^ R ^ R )
   // The two XORs cancel — but the pattern is non-trivial for static analysis.
   auto *FBitsConst = ConstantInt::get(ITy, FBits);
@@ -143,6 +151,55 @@ static bool obfuscateFPConstant(Instruction *I, unsigned OpIdx,
   return true;
 }
 
+/// Can operand OpIdx of I be replaced by a computed value?
+///
+/// Several instructions require a *literal* constant in particular operand
+/// slots, and the verifier rejects anything else. Replacing an operand with an
+/// MBA expression there produces a module LLVM refuses to compile — which is
+/// what happened once this pass started working: a `switch` case value became
+/// `i8 %co.ar2` and clang aborted with "Case value is not a constant integer".
+static bool operandIsReplaceable(const Instruction &I, unsigned OpIdx) {
+  // A switch's case values must be ConstantInt. Only the condition (operand 0)
+  // is a free-form value.
+  if (isa<SwitchInst>(&I))
+    return OpIdx == 0;
+
+  // PHI incoming values belong to predecessor edges; a value computed here
+  // would not dominate its use.
+  if (isa<PHINode>(&I))
+    return false;
+
+  // An EH pad has to remain the first instruction of its block, so nothing can
+  // be inserted in front of it.
+  if (I.isEHPad())
+    return false;
+
+  // landingpad clauses must be Constants.
+  if (isa<LandingPadInst>(&I))
+    return false;
+
+  // Intrinsics take immarg parameters that must be literals, and the callee
+  // operand must stay a Function. Covers call, invoke and callbr.
+  if (isa<CallBase>(&I))
+    return false;
+
+  // GEP indices into a struct type must be constant i32.
+  if (isa<GetElementPtrInst>(&I))
+    return false;
+
+  // The allocated count may legally be dynamic, but turning a static alloca
+  // into a dynamic one changes stack behaviour for no obfuscation benefit.
+  if (isa<AllocaInst>(&I))
+    return false;
+
+  // ShuffleVector's mask is a separate field in current LLVM but was an
+  // operand historically; skip it so this stays correct across 17..22.
+  if (isa<ShuffleVectorInst>(&I))
+    return false;
+
+  return true;
+}
+
 static bool obfuscateFunction(Function &F, PRNG &RNG) {
   bool Changed = false;
 
@@ -150,13 +207,9 @@ static bool obfuscateFunction(Function &F, PRNG &RNG) {
     if (BB.getName().starts_with("kagura."))
       continue;
     for (auto &I : BB) {
-      if (isa<PHINode>(&I) || isa<AllocaInst>(&I))
-        continue;
-      if (isa<GetElementPtrInst>(&I))
-        continue;
-      if (isa<CallInst>(&I) || isa<InvokeInst>(&I))
-        continue;
       for (unsigned OpIdx = 0; OpIdx < I.getNumOperands(); ++OpIdx) {
+        if (!operandIsReplaceable(I, OpIdx))
+          continue;
         Value *Op = I.getOperand(OpIdx);
         // 30% chance per constant to avoid code bloat
         if (RNG.nextRange(0, 100) >= 30)
@@ -176,7 +229,7 @@ static bool obfuscateFunction(Function &F, PRNG &RNG) {
 
 PreservedAnalyses ConstantObfuscationPass::run(Function &F,
                                                 FunctionAnalysisManager &) {
-  if (!shouldObfuscate(F, "co", true))
+  if (!shouldObfuscate(F, "co"))
     return PreservedAnalyses::all();
   auto &RNG    = getModulePRNG();
   bool Changed = obfuscateFunction(F, RNG);

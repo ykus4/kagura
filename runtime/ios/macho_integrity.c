@@ -23,6 +23,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __APPLE__
 
 #include <mach-o/dyld.h>
@@ -33,7 +35,6 @@
 #include <string.h>
 
 /* Provided by jailbreak_detection.c / anti_debug.c */
-extern void kagura_tamper_detected(void);
 
 /*
  * Check 1: __TEXT segment virtual memory protection.

@@ -18,6 +18,11 @@
 #   SOURCE    — path to the C source file
 #   EXPECTED  — expected stdout string
 #   TEST_NAME — unique name for per-test temp files
+#   RUNTIME   — (optional) kagura runtime library to link, for passes that emit
+#               calls into it
+#   REQUIRE_IR— (optional) regex the obfuscated IR must match.  Without it a
+#               pass that silently declines to transform anything passes this
+#               test, which is how the VM pass shipped hanging on every input.
 
 cmake_minimum_required(VERSION 3.14)
 
@@ -71,9 +76,25 @@ if(NOT R EQUAL 0)
   message(FATAL_ERROR "opt obfuscation failed (${PASSES}):\n${E}")
 endif()
 
+# ---- Check the pass actually did something -----------------------------------
+if(DEFINED REQUIRE_IR AND NOT REQUIRE_IR STREQUAL "")
+  file(READ ${OBF_IR} _OBF_IR_TEXT)
+  if(NOT _OBF_IR_TEXT MATCHES "${REQUIRE_IR}")
+    message(FATAL_ERROR
+      "Pass(es) ${PASSES} produced no match for '${REQUIRE_IR}' in ${OBF_IR}.\n"
+      "The output comparison below would have passed vacuously."
+    )
+  endif()
+endif()
+
 # ---- Compile obfuscated IR to binary ----------------------------------------
+if(DEFINED RUNTIME AND NOT RUNTIME STREQUAL "")
+  set(_LINK_EXTRA ${RUNTIME})
+else()
+  set(_LINK_EXTRA "")
+endif()
 execute_process(
-  COMMAND ${CLANG} ${OBF_IR} -o ${OBF_BIN}
+  COMMAND ${CLANG} ${OBF_IR} ${_LINK_EXTRA} -o ${OBF_BIN}
   RESULT_VARIABLE R ERROR_VARIABLE E
 )
 if(NOT R EQUAL 0)

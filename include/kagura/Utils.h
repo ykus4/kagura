@@ -23,11 +23,79 @@ void markObfuscated(llvm::Function &F, llvm::StringRef PassName);
 bool hasAnnotation(llvm::Function &F, llvm::StringRef Attr);
 
 /// Returns true if F should be obfuscated by the pass identified by PassAttr.
-/// Respects both module-level flags and per-function annotations:
+///
+/// Applies, in order: kagura's own symbols are never touched, sanitizer-built
+/// functions are skipped, then -kagura-protect / -kagura-deny / -kagura-allow
+/// and the per-function annotations:
 ///   annotate("kagura_<passAttr>")   -> force enable
 ///   annotate("kagura_no<passAttr>") -> force disable
+///
+/// GlobalFlag is what to return when nothing above decides, and defaults to
+/// true — "this pass is in the pipeline, so run unless told otherwise".
+///
+/// Do NOT pass a -kagura-* enable flag here. Whether a pass runs at all is
+/// decided when the pipeline is built (Plugin.cpp consults opt::Flag there);
+/// consulting it a second time inside the pass body made `opt -passes=kagura-X`
+/// silently do nothing for eleven passes, because that entry point never sets
+/// the flag.
 bool shouldObfuscate(llvm::Function &F, llvm::StringRef PassAttr,
-                     bool GlobalFlag);
+                     bool GlobalFlag = true);
+
+/// Returns true if Name is a symbol kagura itself generated.
+///
+/// Passes must not obfuscate their own helpers, and SymbolMap must not report
+/// them. Both checks used to be open-coded and had drifted apart — Utils.cpp
+/// matched only "kagura_" while SymbolMap.cpp also matched "__kagura", so the
+/// "__kg_*" helpers emitted by FunctionSplit and the "kagura.*" globals
+/// emitted by EncryptedLookupTable and ControlFlowFlattening were re-obfuscated
+/// by later passes. This recognises every prefix kagura actually emits.
+bool isKaguraSymbol(llvm::StringRef Name);
+
+// ---- Hashing ----
+
+/// FNV-1a. Used both for compile-time integrity hashes that the C runtime
+/// recomputes and for deriving stable IDs from symbol names, so the constants
+/// must stay in sync with runtime/core/hash.c.
+uint32_t fnv1a32(llvm::ArrayRef<uint8_t> Data);
+uint32_t fnv1a32(llvm::StringRef S);
+uint64_t fnv1a64(llvm::StringRef S);
+
+/// Incremental FNV-1a-32, for callers that hash something other than a flat
+/// byte range (opcode streams, for instance). Start from fnv1a32Init().
+///
+/// Note the two opcode hashes in this codebase deliberately differ:
+/// BasicBlockChecksum feeds only the low byte of each opcode while AntiTamper
+/// feeds all four. They are separate mechanisms with separate runtime
+/// counterparts, so only the constants are shared here — unifying the
+/// byte-feeding would change both hash values.
+constexpr uint32_t fnv1a32Init() { return 0x811c9dc5u; }
+constexpr uint32_t fnv1a32Update(uint32_t Hash, uint8_t Byte) {
+  return (Hash ^ Byte) * 0x01000193u;
+}
+
+// ---- Module constructor priorities ----
+
+/// Priorities for llvm::appendToGlobalCtors.
+///
+/// The ordering between kagura's constructors is a real correctness
+/// constraint — string tables must be decrypted before anything reads them,
+/// and the PAC key must exist before any signed pointer is authenticated —
+/// but it used to live only in trailing comments next to seven bare integers.
+/// Lower runs earlier.
+enum class CtorPriority : int {
+  SwiftString   = -1,    ///< Swift string tables: before all other ctors.
+  RuntimeString = 0,     ///< XOR/AES string and CFString tables.
+  AntiDebug     = 0,     ///< Anti-debug init; independent of the string tables.
+  RTTI          = 100,   ///< vtable / typeinfo fixups.
+  ObjCRemap     = 200,   ///< ObjC selector remap table registration.
+  HwPAC         = 65533, ///< arm64e pointer-auth key.
+  SwPAC         = 65534, ///< Software pointer-auth key.
+  ThunkTable    = 65535, ///< Call-indirection thunk table.
+  Honey         = 65535, ///< Decoy initialisation; ordering irrelevant.
+};
+
+/// Register Ctor in llvm.global_ctors at the given priority.
+void appendKaguraCtor(llvm::Module &M, llvm::Function *Ctor, CtorPriority P);
 
 // ---- Pseudo-random number generator ----
 
@@ -123,6 +191,53 @@ bool isWasmTarget(const llvm::Module &M);
 /// are collected.
 std::vector<llvm::GlobalVariable *>
 collectStringGlobals(llvm::Module &M, bool StrictLinkage = false);
+
+// ---- Global-variable use analysis ----
+
+/// Returns true when every use of GV sits at an instruction use site where a
+/// lazy-decrypt guard can be emitted.
+///
+/// Globals referenced from other global initializers are deliberately
+/// excluded: there is no runtime insertion point that can guarantee the
+/// encrypted bytes are decrypted before an initializer-derived pointer is
+/// consumed. PHI users are excluded because the guard splits the block, which
+/// would invalidate the PHI's incoming edges.
+bool hasOnlyGuardableUses(const llvm::GlobalVariable *GV);
+
+// ---- Lazy-decrypt guard ----
+
+/// Emit, immediately before InsertBefore:
+///
+///     if (!FlagGV) { DecryptStub(); FlagGV = 1; }
+///
+/// so an encrypted global is decrypted at most once, on first use, rather than
+/// on every path that reaches it. BBPrefix names the blocks the guard creates
+/// ("lazy" for byte strings, "wlazy" for wide strings) purely so the IR stays
+/// readable when both passes run.
+void emitLazyGuard(llvm::Instruction *InsertBefore,
+                   llvm::GlobalVariable *FlagGV,
+                   llvm::Function *DecryptStub,
+                   llvm::StringRef BBPrefix = "lazy");
+
+// ---- Call rewriting ----
+
+/// Replace CI with an otherwise identical call through NewCallee, preserving
+/// the argument list, operand bundles, calling convention, parameter and
+/// return attributes, tail-call kind, fast-math flags and debug location.
+/// RAUWs and erases CI; returns the replacement.
+///
+/// Four passes open-coded this and one copy had already lost
+/// copyFastMathFlags, silently dropping fast-math on rewritten calls.
+llvm::CallInst *replaceCalleeWith(llvm::CallInst *CI,
+                                  llvm::FunctionType *FTy,
+                                  llvm::Value *NewCallee);
+
+/// RAUW every use of Old with New except New's own use of Old.
+///
+/// The idiom for "wrap a value in a new instruction that consumes it" — e.g.
+/// replacing loads with an XOR of the loaded value. Getting this wrong makes
+/// the new instruction feed itself.
+void replaceAllUsesExcept(llvm::Value *Old, llvm::Instruction *New);
 
 // ---- Constant builders ----
 

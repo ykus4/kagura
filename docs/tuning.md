@@ -1,5 +1,13 @@
 # Tuning Parameters
 
+> **LLVM 22 required for `-mllvm` flags.** On LLVM 17–21, clang parses `-mllvm`
+> options before `-fpass-plugin` has loaded the plugin, so every `-kagura-*`
+> flag is rejected with *"Unknown command line argument"*. Use the shipped
+> `kagura-opt`, or `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`, both
+> of which work on all supported versions. See
+> [Known issues](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md).
+
+
 All flags below can be set via `-mllvm -kagura-<flag>=<value>` on the clang
 command line, or under the `"tuning"` key in a [JSON policy file](configuration.md).
 

@@ -36,6 +36,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __APPLE__
 
 #include <stdint.h>
@@ -45,8 +47,6 @@
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* ---- 1. Swift demangler hook detection ----------------------------------- */
 
@@ -85,8 +85,9 @@ int kagura_swift_metadata_count(void) {
         if (i != 0) continue;
 
         const struct mach_header *hdr = _dyld_get_image_header(i);
-        intptr_t slide = _dyld_get_image_vmaddr_slide(i);
         if (!hdr) continue;
+        /* No ASLR slide needed: this function only returns a descriptor
+         * *count* derived from the section size, never a runtime address. */
 
         /* Walk load commands to find __swift5_types section */
         const struct load_command *lc =

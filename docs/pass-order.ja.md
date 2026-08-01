@@ -4,7 +4,8 @@
 
 ```
 -O1 / -O2 (標準最適化が先)
-  1. kagura-config           → JSON ポリシー読み込み (-kagura-config 設定時)
+  0. (設定読み込み)          → JSON ポリシーはパイプライン構築前に適用される。
+                               パスではない — configuration.md 参照
   2. kagura-ci               → 外部呼び出しの間接化
   3. kagura-pac              → ポインタ認証
   4. kagura-str[-aes]        → ナロー文字列暗号化

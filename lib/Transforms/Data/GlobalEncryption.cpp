@@ -43,6 +43,15 @@ static bool shouldSkipGlobal(const GlobalVariable &GV) {
   return false;
 }
 
+/// All-ones mask for an N-bit value, avoiding the UB of `1ULL << 64`.
+///
+/// Keys must be masked to the value's width before reaching APInt: the
+/// APInt(BitWidth, uint64_t) constructor asserts the value already fits, so an
+/// unmasked 32-bit draw crashes an assertions-enabled build on an i8/i16 global.
+static uint64_t maskForWidth(unsigned Bits) {
+  return Bits >= 64 ? ~0ULL : ((1ULL << Bits) - 1);
+}
+
 /// Return true if Ty is an integer type that we handle (i8/i16/i32/i64).
 static bool isSupportedIntTy(Type *Ty) {
   if (!Ty->isIntegerTy())
@@ -197,11 +206,7 @@ static bool encryptScalarGlobal(GlobalVariable *GV, PRNG &RNG) {
   unsigned Bits = IntTy->getIntegerBitWidth();
 
   // Generate a key with the same bit width.
-  uint64_t RawKey;
-  if (Bits <= 32)
-    RawKey = RNG.next32();
-  else
-    RawKey = RNG.next();
+  uint64_t RawKey = (Bits <= 32 ? RNG.next32() : RNG.next()) & maskForWidth(Bits);
 
   APInt Key(Bits, RawKey);
   APInt PlainVal = CI->getValue();
@@ -313,11 +318,8 @@ static bool encryptArrayGlobal(GlobalVariable *GV, PRNG &RNG) {
     return false;
 
   // Generate one base key; per-element key = BaseKey ^ index.
-  uint64_t BaseKeyRaw;
-  if (Bits <= 32)
-    BaseKeyRaw = RNG.next32();
-  else
-    BaseKeyRaw = RNG.next();
+  uint64_t BaseKeyRaw =
+      (Bits <= 32 ? RNG.next32() : RNG.next()) & maskForWidth(Bits);
   APInt BaseKey(Bits, BaseKeyRaw);
 
   // Build encrypted initializer elements.

@@ -9,31 +9,44 @@
 //
 // Requirements:
 //   - kagura plugin must be built first: run build.sh in the kagura repo
-//   - Set KAGURA_PLUGIN_PATH to the .dylib location
+//   - Set KAGURA_ROOT (or KAGURA_PLUGIN_PATH) so the plugin can be found
 
-// ---- Path to kagura plugin ----
-// Override this in your local .xcconfig or via xcode user-defined setting
-KAGURA_PLUGIN_PATH = $(SRCROOT)/../kagura/build/lib/Transforms/KaguraObfuscator.dylib
+// ---- kagura checkout / plugin location ----
+// kagura-flags.sh derives everything from KAGURA_ROOT and probes for
+// KaguraObfuscator.{dylib,so,dll} under build/lib/Transforms.
+// Set KAGURA_PLUGIN_PATH instead if the plugin lives somewhere else.
+KAGURA_ROOT = $(SRCROOT)/../kagura
+KAGURA_PLUGIN_PATH =
 
-// ---- Feature toggles (set to 1 to enable) ----
-KAGURA_ENABLE_STR     = 1   // string encryption
-KAGURA_ENABLE_FLA     = 1   // CFG flattening
-KAGURA_ENABLE_BCF     = 1   // bogus control flow
-KAGURA_ENABLE_SUB     = 1   // instruction substitution
-KAGURA_ENABLE_CO      = 0   // constant obfuscation (increases binary size)
-KAGURA_ENABLE_OBJC    = 1   // ObjC selector/class obfuscation
-KAGURA_ENABLE_ANTIDEB = 1   // anti-debug / anti-Frida
-KAGURA_ENABLE_METRICS = 0   // print metrics to stderr (debug only)
+// ---- Profile ----
+// fast | balanced | strong | off, or an absolute path to your own JSON policy.
+// The pass set for each profile lives in integration/profiles/<name>.json —
+// the single source of truth shared by all kagura integrations.
+KAGURA_PROFILE = balanced
 
-// ---- Tuning ----
-KAGURA_BCF_PROB  = 30   // bogus CF probability [0-100]
-KAGURA_BCF_ITER  = 1    // bogus CF iterations
-KAGURA_SUB_ITER  = 1    // substitution iterations
+// ---- Per-pass overrides (leave EMPTY to use the profile) ----
+// Setting any of these to 1 switches kagura-flags.sh to the explicit-flag
+// path: the profile is still expanded, your overrides are appended after it,
+// and -kagura-config is dropped so the kagura-config pass cannot clobber them.
+KAGURA_ENABLE_STR     =    // string encryption
+KAGURA_ENABLE_FLA     =    // CFG flattening
+KAGURA_ENABLE_BCF     =    // bogus control flow
+KAGURA_ENABLE_SUB     =    // instruction substitution
+KAGURA_ENABLE_CO      =    // constant obfuscation (increases binary size)
+KAGURA_ENABLE_OBJC    = 1  // ObjC selector/class obfuscation (Apple-only, not in any profile)
+KAGURA_ENABLE_ANTIDEB =    // anti-debug / anti-Frida
+KAGURA_ENABLE_METRICS =    // print metrics to stderr (debug only)
+
+// ---- Tuning overrides (leave EMPTY to use the profile) ----
+KAGURA_BCF_PROB  =    // bogus CF probability [0-100]
+KAGURA_BCF_ITER  =    // bogus CF iterations
+KAGURA_SUB_ITER  =    // substitution iterations
+KAGURA_SEED      =    // PRNG seed (0 = entropy)
 
 // ---- Build flags ----
 // These are assembled by kagura-flags.sh and injected via OTHER_CFLAGS
-// Do not edit below this line — edit the toggles above instead
-KAGURA_FLAGS = $(SRCROOT)/../kagura/integration/xcode/kagura-flags.sh
+// Do not edit below this line — edit the settings above instead
+KAGURA_FLAGS = $(KAGURA_ROOT)/integration/xcode/kagura-flags.sh
 
 // Inject plugin into clang invocation
 OTHER_CFLAGS = $(inherited) $(shell $(KAGURA_FLAGS))

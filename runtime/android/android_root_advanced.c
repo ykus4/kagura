@@ -34,6 +34,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __ANDROID__
 
 #include <stdint.h>
@@ -42,29 +44,19 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-extern void kagura_tamper_detected(void);
-
 /* -------------------------------------------------------------------------
  * Helpers
  * ---------------------------------------------------------------------- */
 
-static int _path_exists(const char *path) {
-    struct stat st;
-    return (stat(path, &st) == 0) ? 1 : 0;
-}
+/* Shared probes from core/pathprobe.c and core/procfs.c. */
+#define path_exists(p) kagura_path_exists_hardened(p)
 
-/* Scan /proc/self/maps for a path fragment.  Returns 1 if found. */
-static int _maps_contain(const char *fragment) {
-    FILE *f = fopen("/proc/self/maps", "r");
-    if (!f)
-        return 0;
-    char line[512];
-    int found = 0;
-    while (!found && fgets(line, (int)sizeof(line), f))
-        if (strstr(line, fragment))
-            found = 1;
-    fclose(f);
-    return found;
+/* Single-fragment convenience wrapper over kaguramaps_contain(). */
+static int maps_contain(const char *fragment) {
+    const char *patterns[2];
+    patterns[0] = fragment;
+    patterns[1] = NULL;
+    return kaguramaps_contain(patterns);
 }
 
 /* -------------------------------------------------------------------------
@@ -90,18 +82,18 @@ static const char *kMagiskPaths[] = {
 int kagura_magisk_present(void) {
     /* Path probes */
     for (int i = 0; kMagiskPaths[i] != NULL; ++i)
-        if (_path_exists(kMagiskPaths[i]))
+        if (path_exists(kMagiskPaths[i]))
             return 1;
 
     /* Zygisk injects its .so from /dev/fd or /data/adb paths */
-    if (_maps_contain("/data/adb/"))
+    if (maps_contain("/data/adb/"))
         return 1;
-    if (_maps_contain("zygisk"))
+    if (maps_contain("zygisk"))
         return 1;
 
     /* Magisk tmpfs mount: /sbin is usually not mounted on stock Android
      * (API 29+ doesn't have /sbin); if it exists and is a tmpfs it's Magisk */
-    if (_path_exists("/sbin"))
+    if (path_exists("/sbin"))
         return 1;
 
     return 0;
@@ -130,15 +122,15 @@ static const char *kXposedPaths[] = {
 int kagura_xposed_present(void) {
     /* Path probes */
     for (int i = 0; kXposedPaths[i] != NULL; ++i)
-        if (_path_exists(kXposedPaths[i]))
+        if (path_exists(kXposedPaths[i]))
             return 1;
 
     /* /proc/self/maps scan */
-    if (_maps_contain("XposedBridge"))
+    if (maps_contain("XposedBridge"))
         return 1;
-    if (_maps_contain("de.robv.android.xposed"))
+    if (maps_contain("de.robv.android.xposed"))
         return 1;
-    if (_maps_contain("/lspd"))
+    if (maps_contain("/lspd"))
         return 1;
 
     /* app_process replacement: if /proc/self/exe is not the stock path

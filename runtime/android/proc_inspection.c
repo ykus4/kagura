@@ -21,14 +21,14 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #if defined(__linux__) || defined(__ANDROID__)
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* ── Suspicious patterns in /proc/self/maps ─────────────────────────────── */
 
@@ -47,27 +47,11 @@ static const char *const kSuspiciousMaps[] = {
 };
 
 int kagura_proc_maps_suspicious(void) {
-    FILE *f = fopen("/proc/self/maps", "r");
-    if (!f) return 0;
-    char line[512];
-    while (fgets(line, sizeof(line), f)) {
-        for (int i = 0; kSuspiciousMaps[i]; ++i) {
-            /* case-insensitive substring search via strstr + tolower manually */
-            char lower[512];
-            int j;
-            for (j = 0; j < (int)sizeof(lower) - 1 && line[j]; ++j) {
-                char c = line[j];
-                lower[j] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
-            }
-            lower[j] = '\0';
-            if (strstr(lower, kSuspiciousMaps[i])) {
-                fclose(f);
-                return 1;
-            }
-        }
-    }
-    fclose(f);
-    return 0;
+    /* Android-specific artefacts (zygisk, /data/adb/modules, ...) plus the
+     * shared injection-framework table.  Case folding now lives in
+     * core/procfs.c instead of a per-line 512-byte lowercase copy here. */
+    return kagura_maps_contain(kSuspiciousMaps) ||
+           kagura_maps_contain(kagura_suspicious_image_patterns());
 }
 
 /* ── TracerPid detection via /proc/self/status ──────────────────────────── */

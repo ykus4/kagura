@@ -202,7 +202,7 @@ PreservedAnalyses ObjCObfuscationPass::run(Module &M,
     }
     B.CreateRetVoid();
 
-    appendToGlobalCtors(M, Ctor, 200); // after RTTI ctors (100), before app ctors
+    appendKaguraCtor(M, Ctor, CtorPriority::ObjCRemap);
   }
 
   return PreservedAnalyses::none();

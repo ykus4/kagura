@@ -32,6 +32,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -52,8 +54,6 @@
 #include <mach/vm_map.h>
 #include <unistd.h>
 #endif
-
-extern void kagura_on_tamper_detected(void) __attribute__((weak));
 
 /* ---- 1. Sensitive region poisoning ---------------------------------------- */
 

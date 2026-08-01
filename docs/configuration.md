@@ -23,8 +23,22 @@ real projects.
 }
 ```
 
-The policy file is consumed by the **`kagura-config`** pass at the very start
-of the pipeline; it sets defaults for every subsequent pass. Per-function
+The policy file is read **before the pass pipeline is constructed**, not by a
+pass within it. That distinction matters: pass selection is decided while the
+pipeline is being built, so a loader running as a pipeline pass would always
+arrive too late to influence it — which is exactly why `-kagura-config` was a
+no-op prior to the current release.
+
+Precedence, highest first:
+
+1. An explicit `-kagura-*` command-line flag. `-kagura-config=p.json
+   -kagura-str=false` disables string encryption even if `p.json` asks for it.
+2. A `flavors` block matching `$KAGURA_FLAVOR`.
+3. The `passes` / `tuning` objects.
+4. The `profile` preset.
+5. The built-in default (every pass off).
+
+Per-function
 [`__attribute__((annotate("kagura_*")))`](getting-started/quick-start.md#5-per-function-control)
 overrides still win on a function-by-function basis.
 
@@ -32,11 +46,22 @@ overrides still win on a function-by-function basis.
 
 Built-in profiles selected by the `"profile"` key:
 
-| Profile | Passes | Intended use |
-|:--------|:-------|:-------------|
-| `FAST`     | STR only | Debug / CI builds with minimal overhead |
-| `BALANCED` | STR + BCF + BBR + BBS + GENC + MVO | Standard release builds |
-| `STRONG`   | All passes, BCF prob 60, 2 iterations | Security-critical shipping builds |
+| Profile | Passes enabled | Tuning | Intended use |
+|:--------|:---------------|:-------|:-------------|
+| `FAST`     | `str` | — | Debug / CI builds with minimal overhead |
+| `BALANCED` | `str` `wstr` `bcf` `bbr` `bbs` `dci` `genc` `mvo` | `bcf_prob` 20, `bcf_iter` 1 | Standard release builds |
+| `STRONG`   | `str` `str-aes` `wstr` `fla` `bcf` `sub` `co` `ibr` `lt` `bbr` `bbs` `dci` `genc` `mvo` `sv` `honey` | `bcf_prob` 50, `bcf_iter` 2, `sub_iter` 2 | Security-critical shipping builds |
+
+`STRONG` is not "every pass". It deliberately leaves off the passes that need
+a linked `kagura_runtime`, change the ABI, or carry an outsized cost:
+`anti-debug`, `tamper`, `ci`, `pac`, `vm`, `fsplit`, `pe`, `elt`, `vtp`,
+`bbcheck`, `telemetry` and `string-split`. Enable those explicitly in the
+`passes` object when you want them.
+
+The ready-made files in
+[`integration/profiles/`](https://github.com/ykus4/kagura/tree/main/integration/profiles)
+start from these presets and then set some of the above explicitly — read the
+file rather than assuming it matches the preset exactly.
 
 A profile sets defaults; anything in `"passes"` or `"tuning"` overrides the
 profile's choices for that specific key.

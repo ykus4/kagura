@@ -1,0 +1,34 @@
+{
+  "profile": "FAST",
+  "passes": {
+    "str": true,
+    "sv": true,
+    "anti_debug": true,
+
+    "str_aes": false,
+    "wstr": false,
+    "fla": false,
+    "bcf": false,
+    "sub": false,
+    "co": false,
+    "ibr": false,
+    "lt": false,
+    "bbr": false,
+    "bbs": false,
+    "dci": false,
+    "fsplit": false,
+    "genc": false,
+    "mvo": false,
+    "pe": false,
+    "honey": false,
+    "tamper": false,
+    "vm": false
+  },
+  "tuning": {
+    "bcf_prob": 30,
+    "bcf_iter": 1,
+    "sub_iter": 1,
+    "dci_prob": 40,
+    "seed": 0
+  }
+}

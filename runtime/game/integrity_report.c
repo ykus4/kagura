@@ -45,6 +45,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -52,15 +54,9 @@
 #include <time.h>
 
 /* ---- FNV-1a-64 MAC -------------------------------------------------------- */
+/* Shared implementation in core/hash.c. */
 
-static uint64_t fnv1a64(const uint8_t *data, size_t len) {
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (size_t i = 0; i < len; ++i) {
-        h ^= data[i];
-        h *= 0x100000001b3ULL;
-    }
-    return h;
-}
+#define fnv1a64(data, len) kagura_fnv1a64_buf((data), (len))
 
 /* ---- Nonce replay-prevention ring buffer ---------------------------------- */
 
@@ -114,28 +110,30 @@ void kagura_nonce_consume(const char *nonce, size_t len) {
 
 /* ---- Device key hash ------------------------------------------------------ */
 
-/* Forward declaration: defined in device_key.c */
-extern void kagura_device_key(uint8_t out_key[16]) __attribute__((weak));
-
 static uint64_t get_device_key_hash(void) {
     uint8_t key[16] = {0};
-    if (kagura_device_key) kagura_device_key(key);
+    /* kagura_device_key returns 1 on success and leaves the buffer untouched
+     * on failure.  It used to be declared here as returning void, so the
+     * status was invisible and an all-zero key hashed identically on every
+     * device that had no stable identity. */
+    if (!kagura_device_key(key))
+        memset(key, 0, sizeof(key));
     return fnv1a64(key, sizeof(key));
 }
 
-/* ---- Behavior score ------------------------------------------------------- */
-
-/* Forward declaration: defined in behavior_log.c */
-extern int kagura_behavior_score(void) __attribute__((weak));
-
-/* ---- Violation flags bitmask ---------------------------------------------- */
-
-/* Forward declarations for tamper checks; all are optional (weak). */
-extern int kagura_root_check(void)          __attribute__((weak));
-extern int kagura_frida_check(void)         __attribute__((weak));
-extern int kagura_emulator_check(void)      __attribute__((weak));
-extern int kagura_debugger_check(void)      __attribute__((weak));
-extern int kagura_integrity_check(void)     __attribute__((weak));
+/* ---- Violation flags bitmask ----------------------------------------------
+ *
+ * These five probes used to be `extern ... __attribute__((weak))` declarations
+ * of kagura_root_check / kagura_frida_check / kagura_emulator_check /
+ * kagura_debugger_check / kagura_integrity_check.  None of those symbols has
+ * ever existed under any of those names, so every weak pointer was NULL and
+ * collect_violation_flags() returned 0 unconditionally - the report always
+ * claimed a clean device.
+ *
+ * Each probe now dispatches to the real detector for the platform.  The names
+ * come from internal.h, so a rename is a compile error rather than a silent
+ * regression back to "always clean".
+ */
 
 #define FLAG_ROOTED       (1u << 0)
 #define FLAG_FRIDA        (1u << 1)
@@ -143,13 +141,66 @@ extern int kagura_integrity_check(void)     __attribute__((weak));
 #define FLAG_DEBUGGER     (1u << 3)
 #define FLAG_INTEGRITY    (1u << 4)
 
+/* Root / jailbreak. */
+static int probe_rooted(void) {
+#if defined(__APPLE__)
+    return kagura_jailbreak_detected();
+#elif defined(__linux__) || defined(__ANDROID__)
+    return kagura_magisk_present() || kagura_xposed_present();
+#else
+    return 0;   /* no equivalent concept on Windows */
+#endif
+}
+
+/* Frida / Substrate / other injected instrumentation. */
+static int probe_frida(void) {
+#if defined(_WIN32)
+    return kagura_check_injected_dlls() || kagura_check_frida_port();
+#else
+    return kagura_suspicious_lib_loaded() || kagura_check_frida_port();
+#endif
+}
+
+/* Emulator / simulator. */
+static int probe_emulator(void) {
+#if defined(_WIN32)
+    return 0;   /* runtime/windows has no emulator detector yet */
+#else
+    return kagura_check_emulator();
+#endif
+}
+
+/* Attached debugger. */
+static int probe_debugger(void) {
+#if defined(_WIN32)
+    return kagura_check_debugger_present() ||
+           kagura_check_remote_debugger()  ||
+           kagura_check_nt_debug_port();
+#else
+    return kagura_check_tracer_pid();
+#endif
+}
+
+/* Executable image integrity. */
+static int probe_integrity(void) {
+#if defined(__APPLE__)
+    return kagura_macho_tampered();
+#elif defined(__linux__) || defined(__ANDROID__)
+    return kagura_elf_tampered();
+#elif defined(_WIN32)
+    return !kagura_pe_checksum_valid();
+#else
+    return 0;
+#endif
+}
+
 static uint32_t collect_violation_flags(void) {
     uint32_t flags = 0;
-    if (kagura_root_check     && kagura_root_check())      flags |= FLAG_ROOTED;
-    if (kagura_frida_check    && kagura_frida_check())     flags |= FLAG_FRIDA;
-    if (kagura_emulator_check && kagura_emulator_check())  flags |= FLAG_EMULATOR;
-    if (kagura_debugger_check && kagura_debugger_check())  flags |= FLAG_DEBUGGER;
-    if (kagura_integrity_check&& kagura_integrity_check()) flags |= FLAG_INTEGRITY;
+    if (probe_rooted())    flags |= FLAG_ROOTED;
+    if (probe_frida())     flags |= FLAG_FRIDA;
+    if (probe_emulator())  flags |= FLAG_EMULATOR;
+    if (probe_debugger())  flags |= FLAG_DEBUGGER;
+    if (probe_integrity()) flags |= FLAG_INTEGRITY;
     return flags;
 }
 
@@ -183,7 +234,8 @@ int kagura_integrity_report_build(const char *nonce,
     if (!nonce || !out_buf || buf_len < 256) return -1;
 
     uint64_t dk_hash  = get_device_key_hash();
-    int      bscore   = kagura_behavior_score ? kagura_behavior_score() : 0;
+    /* Was `kagura_behavior_score`, a name behavior_log.c has never exported. */
+    int      bscore   = kagura_suspicion_score();
     uint32_t vflags   = collect_violation_flags();
     time_t   ts       = time(NULL);
 

@@ -216,7 +216,7 @@ static bool obfuscateFunction(Function &F, uint32_t Probability,
 
 PreservedAnalyses BogusControlFlowPass::run(Function &F,
                                              FunctionAnalysisManager &) {
-  if (!shouldObfuscate(F, "bcf", true))
+  if (!shouldObfuscate(F, "bcf"))
     return PreservedAnalyses::all();
   auto &RNG    = getModulePRNG();
   bool Changed = obfuscateFunction(F, Probability, Iterations, RNG);

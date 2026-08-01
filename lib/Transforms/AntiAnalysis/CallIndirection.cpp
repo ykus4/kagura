@@ -289,7 +289,7 @@ PreservedAnalyses CallIndirectionPass::run(Module &M,
   // 4. Build and register the constructor that fills the table at startup.
   Function *Ctor = buildInitConstructor(M, ThunkTable, Callees);
   // Priority 65535 = very late, after most other constructors.
-  appendToGlobalCtors(M, Ctor, 65535);
+  appendKaguraCtor(M, Ctor, CtorPriority::ThunkTable);
 
   return PreservedAnalyses::none();
 }

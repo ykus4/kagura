@@ -37,7 +37,12 @@ Manager** via `PassPluginLibraryInfo`. It does two things:
 
 ## Configuration & options
 
-`Options.cpp` is the single source of truth for every CLI flag — adding a new
-tunable means adding a `cl::opt<...>` there, then reading it from the pass.
-The [`kagura-config`](configuration.md) loader runs first in the pipeline and
-populates these option values from the JSON policy file.
+Per-pass enable flags are generated from `PassRegistry.def`, so they cannot
+drift from the pass list; `Options.cpp` defines the tuning parameters and the
+infrastructure flags by hand. Adding a tunable means adding a `cl::opt<...>`
+there, then reading it from the pass.
+
+The [`kagura-config`](configuration.md) loader is **not** a pass. It is called
+from `Plugin.cpp` before the pipeline is constructed, because the `opt::`
+values are read at construction time to decide which passes to add — a loader
+running as a pipeline pass could never affect that decision.

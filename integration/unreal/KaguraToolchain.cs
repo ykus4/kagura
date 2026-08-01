@@ -30,19 +30,77 @@ namespace KaguraObfuscation
 
     public static class KaguraConfig
     {
-        // Path to KaguraObfuscator.dylib / .so
-        public static string PluginPath =>
-            Environment.GetEnvironmentVariable("KAGURA_PLUGIN_PATH")
-            ?? Path.Combine(Unreal.RootDirectory.FullName,
-                            "../kagura/build/lib/Transforms/KaguraObfuscator.dylib");
+        // Root of the kagura checkout; everything else is derived from it.
+        public static string KaguraRoot =>
+            Environment.GetEnvironmentVariable("KAGURA_ROOT")
+            ?? Path.Combine(Unreal.RootDirectory.FullName, "../kagura");
+
+        // Path to KaguraObfuscator.{dylib,so,dll}.
+        // UBT runs the plugin in the HOST clang, so the host's library
+        // extension is what matters — probe all three rather than assuming.
+        public static string PluginPath
+        {
+            get
+            {
+                string explicitPath =
+                    Environment.GetEnvironmentVariable("KAGURA_PLUGIN_PATH");
+                if (!string.IsNullOrEmpty(explicitPath) && File.Exists(explicitPath))
+                {
+                    return explicitPath;
+                }
+
+                string dir = Path.Combine(KaguraRoot, "build/lib/Transforms");
+                foreach (string ext in new[] { "dylib", "so", "dll" })
+                {
+                    string candidate = Path.Combine(dir, "KaguraObfuscator." + ext);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+                return explicitPath ?? Path.Combine(dir, "KaguraObfuscator.dylib");
+            }
+        }
 
         // Path to libkagura_runtime.a
         public static string RuntimeLibPath =>
             Environment.GetEnvironmentVariable("KAGURA_RUNTIME_LIB")
-            ?? Path.Combine(Unreal.RootDirectory.FullName,
-                            "../kagura/build/runtime/libkagura_runtime.a");
+            ?? Path.Combine(KaguraRoot, "build/runtime/libkagura_runtime.a");
 
-        // Pass selection — mirrors KaguraSettings in the Unity integration
+        // Profile: fast | balanced | strong | off, or a path to your own JSON
+        // policy file. The pass set for each profile lives in
+        // <kagura>/integration/profiles/<name>.json — the single source of
+        // truth shared by every kagura integration.
+        public static string Profile =>
+            Environment.GetEnvironmentVariable("KAGURA_PROFILE") ?? "balanced";
+
+        public static string ProfilePath
+        {
+            get
+            {
+                string p = Profile;
+                if (string.IsNullOrEmpty(p) ||
+                    string.Equals(p, "off", StringComparison.OrdinalIgnoreCase))
+                {
+                    return string.Empty;
+                }
+
+                string lower = p.ToLowerInvariant();
+                if (lower == "fast" || lower == "balanced" || lower == "strong")
+                {
+                    return Path.Combine(KaguraRoot,
+                                        "integration/profiles/" + lower + ".json");
+                }
+                return p;
+            }
+        }
+
+        // Set to false to bypass the shared profile and use the explicit flag
+        // list below. Prefer the profile: six copies of this list across the
+        // integration directories is exactly how they drifted apart.
+        public static bool UseProfile = true;
+
+        // Explicit-flag fallback — mirrors KaguraSettings in the Unity integration
         public static bool EnableStr        = true;
         public static bool EnableFla        = true;
         public static bool EnableBcf        = true;
@@ -86,6 +144,23 @@ namespace KaguraObfuscation
                 if (enabled) { flags.Add("-mllvm"); flags.Add(flag); }
             }
 
+            // Preferred path: let the shared profile decide the pass set.
+            string profilePath = KaguraConfig.ProfilePath;
+            if (KaguraConfig.UseProfile && !string.IsNullOrEmpty(profilePath))
+            {
+                if (File.Exists(profilePath))
+                {
+                    Add(true, $"-kagura-config={profilePath}");
+                    return flags;
+                }
+
+                Log.TraceWarning(
+                    $"[kagura] Profile not found: {profilePath} — " +
+                    "falling back to the explicit flag list");
+            }
+
+            // Fallback: explicit flags. Also the escape hatch for per-pass
+            // overrides, since -kagura-config would clobber them.
             Add(KaguraConfig.EnableStr,       "-kagura-str");
             Add(KaguraConfig.EnableFla,       "-kagura-fla");
             Add(KaguraConfig.EnableBcf,       "-kagura-bcf");

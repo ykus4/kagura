@@ -268,12 +268,7 @@ static unsigned rewriteLoadCallPairs(GlobalVariable *TaggedGV,
 /// Compute a 16-bit discriminator from a global's name via FNV-1a-32.
 /// Only the low 16 bits are used (hardware PAC discriminator width).
 static uint64_t computeDiscriminator(StringRef Name) {
-  uint32_t h = 0x811c9dc5u;
-  for (char C : Name) {
-    h ^= static_cast<uint8_t>(C);
-    h *= 0x01000193u;
-  }
-  return static_cast<uint64_t>(h & 0xFFFFu);
+  return static_cast<uint64_t>(fnv1a32(Name) & 0xFFFFu);
 }
 
 /// Return the @llvm.ptrauth.sign intrinsic (LLVM 17+ with ptrauth support).
@@ -342,7 +337,7 @@ static GlobalVariable *hwPACTagGlobal(GlobalVariable *GV, Module &M,
   B.CreateStore(Signed, Tagged);
   B.CreateRetVoid();
 
-  appendToGlobalCtors(M, Ctor, 65533); // before software PAC (65534)
+  appendKaguraCtor(M, Ctor, CtorPriority::HwPAC);
   return Tagged;
 }
 
@@ -503,7 +498,7 @@ PreservedAnalyses PointerAuthPass::run(Module &M, ModuleAnalysisManager &) {
     // Build and register the software PAC key initialisation constructor.
     // Priority 65534 so it runs just before the thunk table constructor (65535).
     Function *Ctor = buildPacKeyConstructor(M, PacKey);
-    appendToGlobalCtors(M, Ctor, 65534);
+    appendKaguraCtor(M, Ctor, CtorPriority::SwPAC);
   }
 
   return PreservedAnalyses::none();

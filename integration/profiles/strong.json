@@ -1,0 +1,34 @@
+{
+  "profile": "STRONG",
+  "passes": {
+    "str": true,
+    "str_aes": true,
+    "wstr": true,
+    "fla": true,
+    "bcf": true,
+    "sub": true,
+    "co": true,
+    "ibr": true,
+    "lt": true,
+    "bbr": true,
+    "bbs": true,
+    "dci": true,
+    "genc": true,
+    "mvo": true,
+    "sv": true,
+    "honey": true,
+    "anti_debug": true,
+    "tamper": true,
+
+    "fsplit": false,
+    "pe": false,
+    "vm": false
+  },
+  "tuning": {
+    "bcf_prob": 50,
+    "bcf_iter": 2,
+    "sub_iter": 2,
+    "dci_prob": 40,
+    "seed": 0
+  }
+}

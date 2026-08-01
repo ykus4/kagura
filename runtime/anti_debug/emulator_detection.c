@@ -21,10 +21,10 @@
  *   kagura_assert_real_device() - Calls tamper callback if emulator detected
  */
 
+#include "../internal.h"
+
 #include <stdint.h>
 #include <string.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* ─── iOS simulator (compile-time) ─────────────────────────────────────── */
 

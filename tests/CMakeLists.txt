@@ -117,6 +117,55 @@ kagura_add_pass_test(test_function_split
   "kagura-fsplit"
   combined_test.c)
 
+# ── Link smoke tests ───────────────────────────────────────────────────────────
+#
+# Every test above stops at the IR level, so a pass that emits a call to a
+# runtime function the runtime does not define still passes them.  Three
+# passes shipped in exactly that state.  These tests link a real executable.
+#
+# The pass list is read out of PassRegistry.def rather than written here, so a
+# newly registered pass is covered the moment its row is added.
+
+set(KAGURA_LINK_SUBJECTS
+  ${CMAKE_CURRENT_SOURCE_DIR}/pass-inputs/combined_test.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/pass-inputs/string_test.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/pass-inputs/control_flow_test.c
+)
+
+# Function-level passes must be wrapped in function(...) for opt; module-level
+# passes are named directly. The registry already records which is which, so
+# read the macro name alongside the CLI name rather than maintaining a list.
+file(STRINGS ${PROJECT_SOURCE_DIR}/lib/Transforms/PassRegistry.def
+     KAGURA_PASS_ROWS
+     REGEX "^KAGURA_(FN|MOD)_PASS\\(")
+
+foreach(_row IN LISTS KAGURA_PASS_ROWS)
+  if(_row MATCHES "^KAGURA_(FN|MOD)_PASS\\([^\"]*\"(kagura-[a-z0-9-]+)\"")
+    set(_kind ${CMAKE_MATCH_1})
+    set(_cli  ${CMAKE_MATCH_2})
+    if(_kind STREQUAL "FN")
+      set(_pipeline "function(${_cli})")
+    else()
+      set(_pipeline "${_cli}")
+    endif()
+    add_test(NAME link_${_cli}
+      COMMAND ${CMAKE_COMMAND}
+        -DCLANG=${LLVM_BIN}/clang
+        -DOPT=${LLVM_BIN}/opt
+        -DPLUGIN=${KAGURA_PLUGIN}
+        -DRUNTIME=$<TARGET_FILE:kagura_runtime>
+        -DPIPELINE=${_pipeline}
+        -DLABEL=${_cli}
+        "-DSOURCES=${KAGURA_LINK_SUBJECTS}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/run_link_test.cmake
+    )
+    set_tests_properties(link_${_cli} PROPERTIES LABELS link)
+  endif()
+endforeach()
+
+list(LENGTH KAGURA_PASS_ROWS _n_passes)
+message(STATUS "[kagura] Registered ${_n_passes} link smoke tests from PassRegistry.def")
+
 # ── FileCheck / lit tests ──────────────────────────────────────────────────────
 
 find_program(LIT_EXECUTABLE NAMES lit llvm-lit
@@ -141,15 +190,27 @@ add_subdirectory(regression)
 if(LIT_EXECUTABLE AND FILECHECK_EXECUTABLE)
   set(KAGURA_PLUGIN_PATH $<TARGET_FILE:KaguraObfuscator>)
 
+  # configure_file() expands @VAR@ but leaves $<TARGET_FILE:...> untouched, so
+  # the plugin path has to go through file(GENERATE) afterwards.  Writing the
+  # intermediate to a .in-stage name keeps the final lit.site.cfg.py the only
+  # file lit ever sees.
   configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/lit/lit.site.cfg.py.in
-    ${CMAKE_CURRENT_BINARY_DIR}/lit/lit.site.cfg.py
+    ${CMAKE_CURRENT_BINARY_DIR}/lit/lit.site.cfg.py.stage
     @ONLY
   )
+  file(GENERATE
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lit/lit.site.cfg.py
+    INPUT  ${CMAKE_CURRENT_BINARY_DIR}/lit/lit.site.cfg.py.stage
+  )
 
+  # lit is pointed at the BUILD directory, which is where lit.site.cfg.py is
+  # generated.  The site config sets test_source_root, so lit then walks the
+  # source tree for the .ll files while keeping %t and Output/ under the build
+  # tree.  Pointing lit at the source dir instead makes it load lit.cfg.py
+  # without the generated substitutions and abort.
   add_test(NAME lit-filecheck
-    COMMAND ${LIT_EXECUTABLE} -v ${CMAKE_CURRENT_SOURCE_DIR}/lit/
-      --param kagura_plugin=${KAGURA_PLUGIN_PATH}
+    COMMAND ${LIT_EXECUTABLE} -sv ${CMAKE_CURRENT_BINARY_DIR}/lit
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
   set_tests_properties(lit-filecheck PROPERTIES
@@ -157,4 +218,5 @@ if(LIT_EXECUTABLE AND FILECHECK_EXECUTABLE)
   )
 else()
   message(STATUS "lit or FileCheck not found — skipping FileCheck tests")
+  message(STATUS "  Install with: pip install lit   (FileCheck ships with LLVM)")
 endif()

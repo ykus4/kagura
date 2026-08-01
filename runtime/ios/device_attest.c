@@ -45,6 +45,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #if defined(__APPLE__) && defined(__OBJC__)
 /* When compiled as Objective-C, we can introspect the Foundation runtime. */
 #  define KAGURA_APPLE_RUNTIME 1
@@ -60,12 +62,6 @@
 #include <string.h>
 #include <time.h>
 #include <Availability.h>
-
-/* Forward declarations for environment-screen helpers in this runtime. */
-extern int kagura_check_loaded_libraries(void)   __attribute__((weak));
-extern int kagura_check_breakpoints(void)        __attribute__((weak));
-extern int kagura_testflight_detect(void)        __attribute__((weak));
-extern int kagura_macho_integrity_check(void)    __attribute__((weak));
 
 /* ---- Availability ------------------------------------------------------- */
 
@@ -144,24 +140,43 @@ int kagura_appattest_nonce(uint8_t *out, size_t len) {
  * replacement for App Attest — App Attest is the authoritative answer; this
  * is just a fast-path that lets the client refuse obviously bad environments
  * without waiting for the network round-trip.
+ *
+ * This function used to be dead code.  It called four symbols that were
+ * declared weak here and never defined anywhere under those names:
+ *
+ *   kagura_check_loaded_libraries -> real name kagura_suspicious_lib_loaded
+ *   kagura_testflight_detect      -> real name kagura_is_testflight
+ *   kagura_macho_integrity_check  -> real name kagura_macho_tampered
+ *   kagura_check_breakpoints      -> exists, but returns void and invokes
+ *                                    the tamper hook itself
+ *
+ * Every weak pointer was therefore NULL, every guard short-circuited, and the
+ * function unconditionally returned 1 - "environment is clean".  The names now
+ * come from internal.h, so a future rename breaks the build instead of
+ * silently disabling the screen.
  */
 int kagura_appattest_local_check(void) {
     /* Frida / Substrate / fishhook injection */
-    if (kagura_check_loaded_libraries && kagura_check_loaded_libraries() != 0) {
+    if (kagura_suspicious_lib_loaded())
         return 0;
-    }
-    /* Hardware / software breakpoint surface */
-    if (kagura_check_breakpoints && kagura_check_breakpoints() != 0) {
+
+    /* Hardware / software breakpoint surface.  Deliberately NOT
+     * kagura_check_breakpoints(): that is the response path and terminates the
+     * process, which is far too blunt for a pre-flight screen. */
+    if (kagura_check_sw_breakpoints() || kagura_check_hw_breakpoints())
         return 0;
-    }
-    /* TestFlight build masquerading as App Store release? Most apps want
-     * to allow TestFlight here; the check is informational. Caller decides. */
-    (void)kagura_testflight_detect;
+
+    /* TestFlight build masquerading as an App Store release?  Most apps want
+     * to allow TestFlight here, so this stays informational and does not
+     * fail the screen.  Callers that care should call kagura_is_testflight()
+     * themselves. */
+    (void)kagura_is_testflight();
+
     /* Mach-O integrity: a tampered binary should never get past App Attest
      * anyway, but rejecting here saves an Apple-side round-trip. */
-    if (kagura_macho_integrity_check && kagura_macho_integrity_check() != 0) {
+    if (kagura_macho_tampered())
         return 0;
-    }
+
     return 1;
 }
 

@@ -1,0 +1,18 @@
+# Root Bazel package.
+#
+# This file has to exist at the repository root, not under integration/bazel/,
+# because a Bazel package cannot see outside itself: uplevel references are
+# rejected in glob patterns, and a label like
+# //integration/bazel:../../runtime/aes.c is not expressible. The runtime
+# therefore has to be declared from a package that actually contains runtime/.
+#
+# integration/bazel/BUILD.bazel aliases //:kagura_runtime, so consumers keep
+# using the //integration/bazel:... labels documented in its README.
+
+load("//integration/bazel:kagura.bzl", "kagura_runtime_library")
+
+package(default_visibility = ["//visibility:public"])
+
+kagura_runtime_library(name = "kagura_runtime")
+
+exports_files(glob(["integration/profiles/*.json"]))

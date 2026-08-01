@@ -128,4 +128,20 @@ extern llvm::cl::opt<std::string> AuditLogOut;
 extern llvm::cl::opt<std::string> BuildID;
 
 } // namespace opt
+
+/// Apply -kagura-config=<file> to the opt:: flags above.
+///
+/// This MUST run before anything reads an opt:: flag to decide which passes to
+/// build. It used to happen inside ConfigLoaderPass, i.e. at pipeline *run*
+/// time, while Plugin.cpp reads the same flags at pipeline *construction*
+/// time — so the JSON policy file never affected which passes were added and
+/// `-kagura-config=policy.json` was silently a no-op.
+///
+/// Idempotent: the file is parsed at most once per process.
+///
+/// Flags the user passed explicitly on the command line win over the config
+/// file, so `-kagura-config=p.json -kagura-fla=false` disables flattening even
+/// if p.json asks for it.
+void loadConfigFileIfSpecified();
+
 } // namespace kagura

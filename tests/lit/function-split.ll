@@ -6,8 +6,11 @@
 ;   - At least one outlined helper (kagura_split_) must appear.
 ;   - The function must still return i32.
 
+; The outlined helpers are named __kg_<parent>_bb<N>_<hex>; this test used to
+; check for "@kagura_split_", a name the pass has never emitted. It passed only
+; because the RUN line omits the enable flag, so the pass never ran at all.
 ; CHECK: define i32 @large_func
-; CHECK: @kagura_split_
+; CHECK: @__kg_large_func_bb
 ; CHECK: ret i32
 
 define i32 @large_func(i32 %x) {

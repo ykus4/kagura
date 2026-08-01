@@ -5,9 +5,14 @@ ordering below runs **after** the standard `-O1` / `-O2` optimizations.
 Ordering matters: e.g. `kagura-tamper` measures function checksums **before**
 CFG-mutating passes change the IR.
 
+`kagura-autoselect`, when enabled, runs ahead of everything below: it annotates
+each function with per-pass decisions that the passes then read, and can only
+narrow the set the flags already enabled.
+
 ```
 -O1 / -O2 (standard optimizations first)
-  1. kagura-config           → load JSON policy (if -kagura-config is set)
+  0. (config load)           → JSON policy applied before the pipeline is built,
+                               not as a pass — see configuration.md
   2. kagura-ci               → external call indirection
   3. kagura-pac              → pointer auth
   4. kagura-str[-aes]        → encrypt narrow strings

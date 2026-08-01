@@ -5,30 +5,35 @@
 #
 # Add this as a Run Script phase BEFORE the Compile Sources phase:
 #   Shell: /bin/bash
-#   Script: ${SRCROOT}/../kagura/integration/xcode/kagura-build-phase.sh
+#   Script: ${KAGURA_ROOT}/integration/xcode/kagura-build-phase.sh
+#
+# Everything it reports comes from kagura-flags.sh, so the log always matches
+# what is actually passed to clang.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PLUGIN="${KAGURA_PLUGIN_PATH:-$SCRIPT_DIR/../../build/lib/Transforms/KaguraObfuscator.dylib}"
+KAGURA_ROOT="${KAGURA_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+export KAGURA_ROOT
 
 echo "════════════════════════════════════════"
 echo "  kagura obfuscation configuration"
 echo "════════════════════════════════════════"
-echo "  Plugin: $PLUGIN"
+echo "  kagura root : $KAGURA_ROOT"
+echo "  Profile     : ${KAGURA_PROFILE:-balanced}"
 
-if [ ! -f "$PLUGIN" ]; then
+FLAGS="$("$SCRIPT_DIR/kagura-flags.sh" || true)"
+
+if [ -z "$FLAGS" ] || [[ "$FLAGS" != -fpass-plugin=* ]]; then
   echo "  ⚠️  Plugin not found — obfuscation DISABLED"
-  echo "  Build kagura first: cd $(dirname $SCRIPT_DIR) && bash build.sh"
+  echo "  Build kagura first: cd $KAGURA_ROOT && bash build.sh"
   echo "════════════════════════════════════════"
   exit 0
 fi
 
-echo "  String encryption : ${KAGURA_ENABLE_STR:-1}"
-echo "  CFG flattening    : ${KAGURA_ENABLE_FLA:-1}"
-echo "  Bogus control flow: ${KAGURA_ENABLE_BCF:-1}  (prob=${KAGURA_BCF_PROB:-30}%)"
-echo "  Substitution      : ${KAGURA_ENABLE_SUB:-1}  (iter=${KAGURA_SUB_ITER:-1})"
-echo "  Constant obfusc.  : ${KAGURA_ENABLE_CO:-0}"
-echo "  ObjC obfuscation  : ${KAGURA_ENABLE_OBJC:-1}"
-echo "  Anti-debug/Frida  : ${KAGURA_ENABLE_ANTIDEB:-1}"
+echo "  Plugin      : ${FLAGS%% *}"
+echo "  Passes      :"
+# Print one "-mllvm <flag>" pair per line for a readable build log.
+printf '%s\n' "$FLAGS" | tr ' ' '\n' | grep -v '^-mllvm$' | grep '^-kagura' \
+  | sed 's/^/                /'
 echo "════════════════════════════════════════"

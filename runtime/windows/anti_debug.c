@@ -17,6 +17,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef _WIN32
 
 #include <stdint.h>
@@ -44,11 +46,8 @@ typedef LONG (WINAPI *PFN_NtQueryInformationProcess)(
 
 #define ProcessDebugPort 7
 
-/* ---- Default tamper response -------------------------------------------- */
-
-__attribute__((weak)) void kagura_on_tamper_detected(void) {
-    ExitProcess(1);
-}
+/* The tamper response hook lives in core/tamper_response.c, which already
+ * uses ExitProcess() on _WIN32. */
 
 /* ---- IsDebuggerPresent --------------------------------------------------- */
 

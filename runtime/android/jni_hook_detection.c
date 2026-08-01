@@ -24,14 +24,14 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __ANDROID__
 
 #include <jni.h>
 #include <stdint.h>
 #include <string.h>
 #include <dlfcn.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* Indices into the JNINativeInterface_ table that we verify */
 static const int kCheckedSlots[] = {

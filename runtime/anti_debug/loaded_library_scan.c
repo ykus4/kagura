@@ -20,102 +20,21 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <stddef.h>
 #include <string.h>
 
-extern void kagura_tamper_detected(void);
-
-static const char *kSuspiciousLibs[] = {
-    /* Frida ecosystem */
-    "frida",
-    "FridaGadget",
-    "frida-gadget",
-    "frida-agent",
-    "frida-server",
-    /* Substrate / hooking frameworks */
-    "MobileSubstrate",
-    "CydiaSubstrate",
-    "libhooker",
-    "SubstrateLoader",
-    "libsubstrate",
-    "substrate",
-    /* Debugger helpers */
-    "cycript",
-    "cynject",
-    /* SSL pinning bypass */
-    "SSLKillSwitch",
-    /* Xposed / Android */
-    "xposed",
-    "XposedBridge",
-    "lspd",             /* LSPosed daemon */
-    /* Generic hooking libs */
-    "dobby",
-    "whale",
-    /* Jailbreak helpers */
-    "Liberty",
-    "Shadow",
-    NULL
-};
-
-static int _lib_name_suspicious(const char *name) {
-    if (!name)
-        return 0;
-    for (int i = 0; kSuspiciousLibs[i] != NULL; ++i) {
-        if (strstr(name, kSuspiciousLibs[i]))
-            return 1;
-    }
-    return 0;
-}
-
-/* -------------------------------------------------------------------------
- * iOS / macOS: scan dyld image list
- * ---------------------------------------------------------------------- */
-
-#if defined(__APPLE__)
-#include <mach-o/dyld.h>
-#include <stdint.h>
-
+/*
+ * This file used to own both the pattern list and a per-platform image walk.
+ * Both moved to core/imagelist.c, which merged this list with the four other
+ * divergent copies and made the walk available to every caller (including
+ * Windows, which previously had no equivalent).  Nothing was dropped: the
+ * union is a strict superset of what this file matched.
+ */
 int kagura_suspicious_lib_loaded(void) {
-    int count = (int)_dyld_image_count();
-    for (int i = 0; i < count; ++i) {
-        const char *name = _dyld_get_image_name((uint32_t)i);
-        if (_lib_name_suspicious(name))
-            return 1;
-    }
-    return 0;
+    return kagura_image_list_contains(kagura_suspicious_image_patterns());
 }
-
-/* -------------------------------------------------------------------------
- * Android / Linux: scan dl_iterate_phdr
- * ---------------------------------------------------------------------- */
-
-#elif defined(__linux__) || defined(__ANDROID__)
-#include <link.h>
-
-struct _kls_ctx { int found; };
-
-static int _kls_phdr_cb(struct dl_phdr_info *info, size_t size, void *data) {
-    (void)size;
-    struct _kls_ctx *ctx = (struct _kls_ctx *)data;
-    if (ctx->found) return 1;
-    if (_lib_name_suspicious(info->dlpi_name)) {
-        ctx->found = 1;
-        return 1;
-    }
-    return 0;
-}
-
-int kagura_suspicious_lib_loaded(void) {
-    struct _kls_ctx ctx = { 0 };
-    dl_iterate_phdr(_kls_phdr_cb, &ctx);
-    return ctx.found;
-}
-
-#else
-
-int kagura_suspicious_lib_loaded(void) { return 0; }
-
-#endif /* platform */
 
 void kagura_library_scan_check(void) {
     if (kagura_suspicious_lib_loaded())

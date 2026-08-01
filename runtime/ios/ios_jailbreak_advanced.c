@@ -23,6 +23,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __APPLE__
 
 #include <TargetConditionals.h>
@@ -37,16 +39,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-extern void kagura_tamper_detected(void);
-
 /* -------------------------------------------------------------------------
  * Helpers
  * ---------------------------------------------------------------------- */
 
-static int _ios_path_exists(const char *path) {
-    struct stat st;
-    return (stat(path, &st) == 0) ? 1 : 0;
-}
+/* Shared probe from core/pathprobe.c (hardened: stat + access + open). */
+#define ios_path_exists(p) kagura_path_exists_hardened(p)
 
 /* -------------------------------------------------------------------------
  * Expanded jailbreak filesystem artifact detection
@@ -101,7 +99,7 @@ static const char *kJBPaths[] = {
 
 int kagura_jailbreak_fs_artifacts(void) {
     for (int i = 0; kJBPaths[i] != NULL; ++i)
-        if (_ios_path_exists(kJBPaths[i]))
+        if (ios_path_exists(kJBPaths[i]))
             return 1;
     return 0;
 }
@@ -122,21 +120,7 @@ void kagura_jailbreak_fs_check(void) {
  *   3. Path probe for known installation locations.
  * ---------------------------------------------------------------------- */
 
-static const char *kSubstrateDylibs[] = {
-    "MobileSubstrate",
-    "CydiaSubstrate",
-    "libhooker",
-    "TweakInject",
-    "FridaGadget",
-    "frida-gadget",
-    "frida-agent",
-    "cycript",
-    "cynject",
-    "SSLKillSwitch",
-    "Liberty",
-    "Shadow",
-    NULL
-};
+/* The former kSubstrateDylibs table is now part of the union in core/imagelist.c. */
 
 static const char *kDlopenProbes[] = {
     "/Library/MobileSubstrate/MobileSubstrate.dylib",
@@ -147,15 +131,10 @@ static const char *kDlopenProbes[] = {
 };
 
 int kagura_cydia_substrate_loaded(void) {
-    /* Layer 1: dyld image list */
-    int count = (int)_dyld_image_count();
-    for (int i = 0; i < count; ++i) {
-        const char *name = _dyld_get_image_name((uint32_t)i);
-        if (!name) continue;
-        for (int j = 0; kSubstrateDylibs[j] != NULL; ++j)
-            if (strstr(name, kSubstrateDylibs[j]))
-                return 1;
-    }
+    /* Layer 1: dyld image list, via the shared union table in
+     * core/imagelist.c (a superset of the former local kSubstrateDylibs). */
+    if (kagura_image_list_contains(kagura_suspicious_image_patterns()))
+        return 1;
 
     /* Layer 2: dlopen probe */
     for (int i = 0; kDlopenProbes[i] != NULL; ++i) {
@@ -168,7 +147,7 @@ int kagura_cydia_substrate_loaded(void) {
 
     /* Layer 3: path probes */
     for (int i = 0; kDlopenProbes[i] != NULL; ++i)
-        if (_ios_path_exists(kDlopenProbes[i]))
+        if (ios_path_exists(kDlopenProbes[i]))
             return 1;
 
     return 0;

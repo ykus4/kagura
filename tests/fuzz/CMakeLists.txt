@@ -9,7 +9,6 @@
 # Requires a clang build with -fsanitize=fuzzer (LLVM >= 6).
 # Set KAGURA_BUILD_FUZZ=ON at cmake configure time to enable.
 
-option(KAGURA_BUILD_FUZZ "Build libFuzzer fuzz targets" OFF)
 
 if(NOT KAGURA_BUILD_FUZZ)
   return()
@@ -32,7 +31,7 @@ macro(kagura_add_fuzz_target NAME SOURCE)
   target_link_libraries(fuzz_${NAME} PRIVATE KaguraObfuscator LLVMCore LLVMSupport
                          LLVMIRReader LLVMPasses LLVMBitReader)
   target_include_directories(fuzz_${NAME} PRIVATE
-    ${CMAKE_SOURCE_DIR}/include ${LLVM_INCLUDE_DIRS})
+    ${PROJECT_SOURCE_DIR}/include ${LLVM_INCLUDE_DIRS})
   target_compile_options(fuzz_${NAME} PRIVATE ${FUZZ_FLAGS})
   target_link_options(fuzz_${NAME} PRIVATE ${FUZZ_FLAGS})
   set_target_properties(fuzz_${NAME} PROPERTIES

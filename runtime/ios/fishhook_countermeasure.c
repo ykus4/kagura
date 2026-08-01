@@ -29,13 +29,13 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __APPLE__
 
 #include <dlfcn.h>
 #include <stdint.h>
 #include <string.h>
-
-extern void kagura_on_tamper_detected(void);
 
 #define PROBE_COUNT 8
 

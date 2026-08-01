@@ -22,6 +22,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __ANDROID__
 
 #include <dlfcn.h>
@@ -29,8 +31,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-extern void kagura_on_tamper_detected(void);
 
 static uintptr_t kOwnBaseAddress = 0;
 

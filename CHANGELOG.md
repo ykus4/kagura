@@ -5,6 +5,209 @@ All notable changes to Kagura are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+A repair release. Several documented flags did nothing at all; a few produced
+binaries that could not link or crashed the compiler. In every case the reason
+it went unnoticed was a hole in the test suite, so the suite was rebuilt too.
+
+### ⚠️ Read this before upgrading
+
+**Passes that previously did nothing now do something.** If you build with any
+of the flags below, expect your output to change — larger binaries, longer
+compile times, and possibly newly-exposed problems in code that was never
+actually obfuscated before. Re-measure size and performance before shipping.
+
+| Flag | Behaviour before | Behaviour now |
+|:-----|:-----------------|:--------------|
+| `-kagura-config=<file>` | ignored entirely | selects passes as documented |
+| `-kagura-co` | no-op at every seed | replaces constants with MBA expressions |
+| `-kagura-autoselect` | no-op | narrows protection per function by risk score |
+| `-kagura-lt`, `-kagura-fsplit` | crashed clang | apply their transforms |
+| `opt -passes=kagura-{bbs,bbr,dci,ibr,lt,fsplit,bbcheck,telemetry,pe,elt,mvo}` | silently inert | apply their transforms |
+
+The `-kagura-config` change is the largest. A policy file requesting
+`"profile": "STRONG"` previously enabled **no** passes; it now enables around
+fourteen.
+
+Precedence is also now defined, where before it was undefined: an explicit
+command-line flag beats the config file, so
+`-kagura-config=p.json -kagura-str=false` disables string encryption rather
+than having the profile preset silently overwrite it.
+
+### Fixed
+
+#### Features that did not work
+
+- **`-kagura-config` was a complete no-op.** `ConfigLoader` ran as a pipeline
+  pass, mutating the `opt::` flags at pipeline *run* time, while `Plugin.cpp`
+  reads those same flags at pipeline *construction* time to decide which
+  passes to add. The policy file therefore always arrived after the decision
+  it was meant to inform. The loader now runs before the pipeline is built.
+- **`-kagura-co` never obfuscated a constant, at any seed.** Every MBA
+  identity is built from a `ConstantInt` operand, and the default
+  `IRBuilder<>` carries a `ConstantFolder` that evaluated `(V ^ R) ^ R`
+  straight back to `V` — so the pass stored the value that was already there.
+  Now uses `IRBuilder<NoFolder>`.
+- **`-kagura-vm` produced binaries that hung before their first line of
+  output.** The interpreter was fine; the pass emitted bytecode that did not
+  mean anything. `virtualize()` handled binops, icmp, br, ret, load, store and
+  three casts — PHI nodes, calls, GEPs, allocas, selects and switches all fell
+  through to "emit NOP and carry on", and an operand it could not materialise
+  made it `continue` out of the middle of an instruction. `canVirtualize()`
+  accepted those functions regardless, so at `-O1` every function with a loop
+  became bytecode that computed nothing: the loop condition degenerated to a
+  literal 0 and the VM took the same edge forever.
+
+  Measured across the test subjects with inlining disabled, **all 16 cases
+  where the old pass virtualized anything hung, segfaulted or aborted**; the 10
+  that appeared to pass had virtualized nothing at all.
+
+  The pass is now all-or-nothing: any shape it cannot express leaves the
+  function untouched. PHIs lower to stack-based parallel copies, allocas to
+  arena offsets, calls through a relocation pool. Two further defects fixed
+  along the way — the bytecode blob was a *mutable* global decrypted in place,
+  so a second call to a virtualized function re-encrypted it; and the
+  trampoline kept the attributes inferred from the original body, advertising
+  `memory(none)` while calling the interpreter.
+
+  Verified: output identical to an unobfuscated build for every subject at
+  -O0/-O1/-O2, across three PRNG seeds, on LLVM 21 and 22 — and repeated calls
+  into the same virtualized function now return the same result.
+  `integration_vm_correctness` guards it, and was confirmed to fail against the
+  old code.
+
+- **`-kagura-lt` and `-kagura-fsplit` crashed clang.** Both emitted IR that
+  fails LLVM's verifier: PHI nodes left ungrouped at the top of a block, and
+  values erased while still in use (the freed slots were recycled, so
+  surviving operands pointed at unrelated values of unrelated types).
+  `FunctionSplit` now threads live-out values through allocas.
+- **Eleven passes were inert under `opt -passes=`.** Each re-checked its own
+  `-kagura-*` enable flag inside the pass body, but that flag is only set by
+  the `-fpass-plugin` entry point. Whether a pass runs is now decided once,
+  when the pipeline is built.
+- **`-kagura-autoselect` was dead three ways over**: never injected into the
+  pipeline, wrote metadata nothing read, and emitted only force-*enable*
+  annotations, which merely restate the default for a pass already in the
+  pipeline.
+- **`-kagura-anti-debug`, `-kagura-bbcheck` and `-kagura-telemetry` could not
+  link** — `kagura_check_tracer_pid` existed only under `#ifdef __linux__`
+  while being emitted unconditionally, and `kagura_bb_check` and
+  `kagura_telemetry_event` were never defined at all.
+- **`-kagura-str-aes` could not link on Windows.** `core/blob_integrity.c`
+  needs only `<stdint.h>` yet sat in the `if(NOT WIN32)` source group.
+- **`KAGURA_UNITY_BUILD=ON` did not compile** — `hasOnlyGuardableUses` was
+  defined identically in two files that share a unity group.
+- Four JSON policy keys — `cse_break`, `string_split`, `bbcheck`, `elt` —
+  were accepted and silently ignored. The key table is now generated from
+  `PassRegistry.def`.
+
+#### Correctness
+
+- Two `APInt` width overflows in key generation, which aborted on any
+  `i8`/`i16` alloca or global.
+- A `VMObfuscation` register-map overflow. With assertions enabled it aborted;
+  with them compiled out — which is what ships — it kept handing out
+  increasing indices, so the emitted bytecode addressed past the end of
+  `VMState::regs[]` and corrupted adjacent interpreter state at run time.
+- `SymbolVisibility` set hidden visibility on `internal` functions, which LLVM
+  rejects (`local linkage requires default visibility`) and which achieves
+  nothing anyway. It now hides unkept *exported* definitions.
+- **Nine runtime checks were silently disabled.** `device_attest.c`,
+  `integrity_report.c` and `play_integrity.c` declared symbols
+  `__attribute__((weak))` under names that do not exist, then null-tested
+  them — so `kagura_appattest_local_check()` always returned 1 and
+  `collect_violation_flags()` always returned 0.
+- `kagura_soft_response_check` was exported with two incompatible signatures
+  (POSIX vs Windows), so no portable caller could exist.
+- `kagura_tamper_detected` lived in an iOS source file, so Android and Windows
+  links that pulled `elf_integrity.o` but not `jailbreak_detection.o` got an
+  undefined symbol. Both callback names now live in `core/tamper_response.c`.
+- On Darwin, `extern` + `weak` does not produce a weak-undefined reference, so
+  `crash_symbolication.c`'s three `__kagura_sym_*` declarations were hard
+  undefined symbols — breaking any consumer that force-loads the archive.
+- Frida port detection was trapped inside `#ifdef __linux__`, i.e. absent on
+  the platforms Frida is most used against.
+
+#### Build and packaging
+
+- **SwiftPM could not build**: all 40 source paths still referenced the
+  pre-reorganization flat `runtime/` layout. `Package.swift` is now at the
+  repository root, where SwiftPM requires it.
+- **Bazel built an empty library**: `glob(["../../runtime/*.c"])` matches
+  nothing, and Bazel rejects uplevel references. A root `BUILD.bazel` declares
+  the runtime from a package that actually contains it.
+- **CocoaPods pulled Android and Windows sources into an iOS pod** — all eight
+  `exclude_files` entries were stale — and pointed at a plugin path that does
+  not exist.
+- `paper/*.tex` and `refs.bib` were gitignored and untracked, so the source
+  behind the README's Zenodo DOI existed on one machine only.
+
+### Added
+
+- **Link smoke tests** — 30 of them, generated from `PassRegistry.def`, each
+  compiling and linking a real executable. No test had ever linked one, which
+  is how three passes shipped referencing undefined symbols.
+- **The lit suite now runs.** Its harness had four stacked faults and CI never
+  installed `lit`, so 29 tests were skipped with a `STATUS` message while the
+  build stayed green. CI now installs `lit` and fails if the suite is not
+  registered.
+- **An assertions-enabled CI job.** Every other job builds `Release`, so
+  `assert()` is compiled out and the three assertion-firing bugs above could
+  never have failed a CI run.
+- Pass tests append `verify` to every pipeline and build subjects at `-O0` as
+  well as `-O2`, since most of what these passes get wrong involves PHI nodes,
+  which barely exist before `mem2reg`.
+- `cmake/` module directory; all eight `KAGURA_*` options documented in one
+  place. `KAGURA_BUILD_FUZZ` previously did not exist unless tests were also
+  enabled.
+- `install()`/`EXPORT` rules. Release bundles were assembled by hand-copying
+  build-tree paths; staging is now `cmake --install`.
+- `integration/profiles/{fast,balanced,strong}.json` — one definition of each
+  profile, replacing five drifted copies across the integration directories.
+- `runtime/internal.h`. `runtime/` had no headers at all; every cross-TU
+  contract was a hand-written `extern`, `kagura_on_tamper_detected` alone
+  appearing 19 times in three inconsistent forms.
+- `docs/requirements.txt`, pinning the documentation toolchain.
+
+### Changed
+
+- `CMAKE_BUILD_TYPE` defaults to `RelWithDebInfo`. A bare `cmake -B build`
+  previously produced an unoptimised build with no `NDEBUG`, matching neither
+  what CI tests nor what releases ship.
+- Duplication removed: FNV-1a (9 implementations → 1, with the constants
+  pinned to canonical vectors on both the pass and runtime sides),
+  `/proc/self/maps` scanning (9 → 1), `path_exists` (6 → 1), dyld image
+  scanning (5 divergent pattern lists → 1 union), module constructor
+  priorities (7 magic integers → `enum CtorPriority`).
+- `runtime/CMakeLists.txt` splits sources per platform. Previously every
+  `android/*.c` was compiled on macOS as an empty translation unit and every
+  `ios/*.c` on Linux.
+
+### Known issues
+
+- **`clang -fpass-plugin=… -mllvm -kagura-…` does not work below LLVM 22.**
+  Pre-existing, and it is the invocation the README leads with. clang parses
+  `-mllvm` options before `-fpass-plugin` has loaded the plugin, so the
+  `-kagura-*` options are not registered yet and clang exits with
+  *"Unknown command line argument '-kagura-str'"*. Verified failing on LLVM 21
+  with both this branch's plugin and `main`'s; accepted on 22.
+
+  Working on every supported version: the shipped `kagura-opt`, or
+  `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`. The test suite uses
+  the latter, which is why this went unnoticed — nothing exercised the
+  documented path. The docs now carry the caveat; picking a real fix (register
+  the options earlier, or make `kagura-opt` the documented entry point) is
+  still open.
+- **`-kagura-bbcheck` cannot detect binary patching.** Its checksum is
+  computed over LLVM IR opcodes before code generation; the runtime has
+  machine code and no way to recompute that value, and `block_id` restarts at
+  1 in every function so it is not a unique key. `kagura_bb_check` is a
+  documented always-pass stub. Fixing this requires the pass to emit
+  post-codegen byte ranges instead.
+- `LegacyPlugin.cpp` builds in no CI job and has drifted from
+  `PassRegistry.def`. It targets LLVM ≤ 16 while the project advertises 17–22.
+
 ## [0.2.1] — 2026-07-31
 
 ### Added

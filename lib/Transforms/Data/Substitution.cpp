@@ -180,7 +180,7 @@ static bool substituteFunction(Function &F, uint32_t Iterations, PRNG &RNG) {
 
 PreservedAnalyses SubstitutionPass::run(Function &F,
                                         FunctionAnalysisManager &) {
-  if (!shouldObfuscate(F, "sub", true))
+  if (!shouldObfuscate(F, "sub"))
     return PreservedAnalyses::all();
   auto &RNG    = getModulePRNG();
   bool Changed = substituteFunction(F, Iterations, RNG);

@@ -33,9 +33,9 @@
  *
  *===----------------------------------------------------------------------===*/
 
-#include <stdint.h>
+#include "../internal.h"
 
-extern void kagura_on_tamper_detected(void);
+#include <stdint.h>
 
 #define KAGURA_MAX_INVARIANTS 32
 
