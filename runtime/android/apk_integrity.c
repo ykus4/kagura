@@ -36,6 +36,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __ANDROID__
 
 #include <fcntl.h>
@@ -44,7 +46,6 @@
 #include <unistd.h>
 
 /* Provided by jailbreak_detection.c */
-extern void kagura_tamper_detected(void);
 
 /* APK Signing Block magic: "APK Sig Block 42" (16 bytes) */
 static const uint8_t APK_SIG_MAGIC[16] = {

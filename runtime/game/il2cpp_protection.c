@@ -24,6 +24,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,11 +34,9 @@
 
 /* Forward declaration for the iOS substrate check from jailbreak_detection.c */
 #if defined(__APPLE__)
-extern int kagura_check_substrate_dylib(void);
 #endif
 
 /* Forward declaration for the tamper response from jailbreak_detection.c */
-extern void kagura_tamper_detected(void) __attribute__((noreturn));
 
 /* -------------------------------------------------------------------------
  * Internal helpers

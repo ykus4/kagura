@@ -120,9 +120,9 @@ uint64_t kagura_random_u64(void);
  * Core primitives
  * =========================================================================== */
 
-/* core/aes.c */
+/* core/aes.c — nonce is 8 bytes; the counter block is nonce || counter. */
 void kagura_aes128_ctr_decrypt(const uint8_t *enc, uint32_t len,
-                               const uint8_t key[16], const uint8_t nonce[16],
+                               const uint8_t key[16], const uint8_t nonce[8],
                                uint8_t *out);
 
 /* core/zero_buf.c */
@@ -130,7 +130,7 @@ void kagura_zero_buf(void *ptr, uint32_t len);
 
 /* core/vm_interpreter.c */
 uint64_t kagura_vm_execute(const uint8_t *bytecode, uint32_t bc_size,
-                           const uint8_t *key, uint32_t key_size);
+                           uint64_t *args, uint32_t nargs);
 
 /* core/blob_integrity.c — emitted by StringEncryptionAES.cpp on every target */
 void kagura_check_blob_integrity(const uint8_t *blob, uint32_t len,
@@ -342,8 +342,8 @@ int  kagura_attestation_ok(JNIEnv *env, const char *response_b64url,
 int  kagura_safetynet_verdict_ok(const char *jws_payload_b64url,
                                  const char *expected_nonce);
 
-#if defined(__linux__) || defined(__ANDROID__)
-/* direct_syscall.c */
+#if !defined(_WIN32)
+/* direct_syscall.c — raw syscalls on Linux/Android, libc on other POSIX. */
 pid_t   kagura_syscall_getpid(void);
 int     kagura_syscall_open(const char *path, int flags);
 int     kagura_syscall_close(int fd);

@@ -87,3 +87,19 @@ set_target_properties(kagura_runtime PROPERTIES
   C_STANDARD 11
   POSITION_INDEPENDENT_CODE ON
 )
+
+# ---- Warnings ----------------------------------------------------------------
+# -Wmissing-prototypes is the load-bearing one: it is what keeps every
+# cross-TU symbol declared in runtime/internal.h and stops the hand-written
+# `extern` declarations from creeping back.  -Wstrict-prototypes catches the
+# K&R `()` spellings that silently accept any argument list.
+#
+# Deliberately no -Werror: CI builds this with several compilers and SDK
+# versions, and a warning that only one of them emits should not break the
+# build for everyone.
+if(MSVC)
+  target_compile_options(kagura_runtime PRIVATE /W4)
+else()
+  target_compile_options(kagura_runtime PRIVATE
+    -Wall -Wextra -Wmissing-prototypes -Wstrict-prototypes)
+endif()

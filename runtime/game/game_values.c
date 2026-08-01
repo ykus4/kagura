@@ -30,18 +30,14 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <stdint.h>
 #include <string.h>
 
-extern void kagura_on_tamper_detected(void);
-
 /* ── Protected floating-point value (speed / position / velocity) ─────── */
 
-typedef struct {
-    uint32_t enc;   /* float bits XOR key */
-    uint32_t key;   /* per-instance key */
-    uint32_t check; /* FNV-1a-32 of the original enc^key for tamper detect */
-} kagura_speed_t;
+/* kagura_speed_t is declared in runtime/internal.h. */
 
 static uint32_t speed_fnv(uint32_t v) {
     uint8_t b[4];
@@ -84,11 +80,7 @@ int kagura_speed_valid(const kagura_speed_t *s, float min, float max) {
 
 /* ── Protected PRNG seed ─────────────────────────────────────────────── */
 
-typedef struct {
-    uint64_t enc;     /* seed ^ key */
-    uint64_t key;
-    uint32_t check;   /* FNV-1a-32 of original seed for tamper detect */
-} kagura_seed_t;
+/* kagura_seed_t is declared in runtime/internal.h. */
 
 static uint32_t seed_fnv(uint64_t v) {
     uint8_t b[8];

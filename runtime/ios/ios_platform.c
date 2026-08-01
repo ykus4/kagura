@@ -15,14 +15,14 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __APPLE__
 
 #include <TargetConditionals.h>
 #include <stdint.h>
 #include <string.h>
 #include <mach-o/dyld.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* ── Simulator detection ─────────────────────────────────────────────── */
 

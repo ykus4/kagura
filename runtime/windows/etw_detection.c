@@ -33,6 +33,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef _WIN32
 
 #include <stdint.h>
@@ -48,8 +50,6 @@
 #  include <tdh.h>
 #  pragma comment(lib, "tdh.lib")
 #endif
-
-extern void kagura_on_tamper_detected(void);
 
 /* ---- Known-bad provider GUIDs ------------------------------------------- */
 

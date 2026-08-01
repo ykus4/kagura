@@ -29,6 +29,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __ANDROID__
 
 #include <stdint.h>
@@ -39,8 +41,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dlfcn.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* ---- FNV-1a-64 (local copy to avoid cross-TU header dependency) --------- */
 

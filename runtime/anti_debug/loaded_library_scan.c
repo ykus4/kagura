@@ -20,10 +20,10 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <stddef.h>
 #include <string.h>
-
-extern void kagura_tamper_detected(void);
 
 static const char *kSuspiciousLibs[] = {
     /* Frida ecosystem */

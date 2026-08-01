@@ -10,6 +10,8 @@
  * The bytecode itself is additionally encrypted by the LLVM pass.
  */
 
+#include "../internal.h"
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>

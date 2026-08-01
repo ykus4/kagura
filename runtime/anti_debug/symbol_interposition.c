@@ -25,6 +25,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <stdint.h>
 #include <string.h>
 #include <dlfcn.h>
@@ -34,10 +36,11 @@
 #include <mach-o/dyld.h>
 #endif
 
-extern void kagura_on_tamper_detected(void);
-
 /* ── Probe list: symbols that frameworks commonly interpose ─────────────── */
+/* Only the dlsym-based Linux/Android path consults this; the Apple path below
+ * inspects the dyld image list instead. */
 
+#if defined(__linux__) || defined(__ANDROID__)
 static const char *const kProbedSymbols[] = {
     "open",
     "fopen",
@@ -48,6 +51,7 @@ static const char *const kProbedSymbols[] = {
     "dlsym",
     NULL
 };
+#endif
 
 /* ── RTLD_DEFAULT vs RTLD_NEXT check ────────────────────────────────────── */
 

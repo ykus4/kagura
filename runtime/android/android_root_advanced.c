@@ -34,6 +34,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __ANDROID__
 
 #include <stdint.h>
@@ -41,8 +43,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-extern void kagura_tamper_detected(void);
 
 /* -------------------------------------------------------------------------
  * Helpers

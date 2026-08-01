@@ -45,6 +45,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #if defined(__APPLE__) && defined(__OBJC__)
 /* When compiled as Objective-C, we can introspect the Foundation runtime. */
 #  define KAGURA_APPLE_RUNTIME 1
@@ -60,8 +62,6 @@
 #include <string.h>
 #include <time.h>
 #include <Availability.h>
-
-#include "../internal.h"
 
 /* ---- Availability ------------------------------------------------------- */
 

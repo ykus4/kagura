@@ -17,6 +17,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __APPLE__
 
 #include <TargetConditionals.h>
@@ -26,8 +28,6 @@
 #include <mach/vm_map.h>
 #include <stdint.h>
 #include <string.h>
-
-extern void kagura_tamper_detected(void);
 
 /* -------------------------------------------------------------------------
  * Code signing status verification

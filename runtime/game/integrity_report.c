@@ -45,13 +45,13 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
-
-#include "../internal.h"
 
 /* ---- FNV-1a-64 MAC -------------------------------------------------------- */
 

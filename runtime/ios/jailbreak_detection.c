@@ -27,6 +27,8 @@
  *         -c runtime/jailbreak_detection.c
  */
 
+#include "../internal.h"
+
 #include <dlfcn.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -34,8 +36,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include "../internal.h"
 
 /* -------------------------------------------------------------------------
  * Helper: file-existence probe

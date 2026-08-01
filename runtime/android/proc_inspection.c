@@ -21,14 +21,14 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #if defined(__linux__) || defined(__ANDROID__)
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* ── Suspicious patterns in /proc/self/maps ─────────────────────────────── */
 

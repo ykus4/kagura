@@ -22,6 +22,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __ANDROID__
 
 #include <fcntl.h>
@@ -30,8 +32,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* Check /proc/self/maps for anonymous rwx (JIT code cache) outside normal
  * ranges — anomalous if a Frida or ART hook planted a fake JIT region. */

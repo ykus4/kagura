@@ -55,6 +55,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __ANDROID__
 
 #include <stdint.h>
@@ -64,8 +66,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <jni.h>
-
-#include "../internal.h"
 
 /* ---- Nonce generation --------------------------------------------------- */
 

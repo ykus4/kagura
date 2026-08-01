@@ -23,6 +23,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #ifdef __APPLE__
 
 #include <TargetConditionals.h>
@@ -36,8 +38,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-extern void kagura_tamper_detected(void);
 
 /* -------------------------------------------------------------------------
  * Helpers

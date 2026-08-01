@@ -15,9 +15,9 @@
  *
  *===----------------------------------------------------------------------===*/
 
-#include <stdint.h>
+#include "../internal.h"
 
-extern void kagura_on_tamper_detected(void);
+#include <stdint.h>
 
 #define FNV_OFFSET_BASIS 0x811c9dc5u
 #define FNV_PRIME        0x01000193u

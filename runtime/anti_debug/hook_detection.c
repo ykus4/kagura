@@ -10,10 +10,10 @@
  *   kagura_check_hooks()         - Combined check; calls tamper callback on hit
  */
 
+#include "../internal.h"
+
 #include <stdint.h>
 #include <string.h>
-
-extern void kagura_on_tamper_detected(void);
 
 /* ─── Inline hook detection ─────────────────────────────────────────────────
  *

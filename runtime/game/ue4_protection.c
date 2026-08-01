@@ -15,13 +15,13 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
-
-extern void kagura_tamper_detected(void) __attribute__((noreturn));
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */
 

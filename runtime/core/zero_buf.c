@@ -8,6 +8,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #include <stdint.h>
 
 void kagura_zero_buf(void *ptr, uint32_t len) {

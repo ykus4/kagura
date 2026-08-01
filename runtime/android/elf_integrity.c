@@ -18,6 +18,8 @@
  *
  *===----------------------------------------------------------------------===*/
 
+#include "../internal.h"
+
 #if defined(__linux__) || defined(__ANDROID__)
 
 #include <elf.h>
@@ -27,8 +29,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-
-extern void kagura_tamper_detected(void);
 
 /* -------------------------------------------------------------------------
  * Check 1 + 2: ELF header magic and W+X PT_LOAD segments
