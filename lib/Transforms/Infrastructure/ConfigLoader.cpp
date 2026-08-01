@@ -33,8 +33,15 @@
 //   BALANCED — STR + BCF(20%) + BBR + BBS + GENC
 //   STRONG   — all passes at maximum settings
 //
-// The loader runs as a module pass BEFORE all other passes so that it can
-// adjust the global opt:: flags before they are read by subsequent passes.
+// The loader is NOT a pass. loadConfigFileIfSpecified() is called from
+// Plugin.cpp while the pipeline is being constructed, because that is where
+// the opt:: flags are read to decide which passes to add. Running it as a pass
+// (as this file used to) is too late: by the time any pass executes, the
+// pipeline is already fixed, so the policy file had no effect at all.
+// ConfigLoaderPass remains only so `opt -passes=kagura-config` stays valid.
+//
+// Precedence: explicit command-line flag > flavor block > passes/tuning object
+// > profile preset > built-in default.
 //
 // Pass key:   "kagura-config"
 // CLI flag:   -kagura-config=<path>
@@ -57,55 +64,68 @@ namespace kagura {
 
 // ---- Profile presets (4.6.2) -----------------------------------------------
 
+/// An option the user named explicitly on the command line outranks the config
+/// file. Without this the config would silently clobber
+/// `-kagura-config=p.json -kagura-fla=false`.
+template <typename T> static bool setByUser(const cl::opt<T> &Flag) {
+  return Flag.getNumOccurrences() > 0;
+}
+
+/// Assign a profile preset value, unless the user set that flag explicitly.
+template <typename T, typename V> static void preset(cl::opt<T> &Flag, V Value) {
+  if (!setByUser(Flag))
+    Flag = static_cast<T>(Value);
+}
+
 static void applyProfile(StringRef Profile) {
   if (Profile.equals_insensitive("fast")) {
-    opt::STR    = true;
-    opt::STRAES = false;
-    opt::WSTR   = false;
-    opt::FLA    = false;
-    opt::BCF    = false;
-    opt::BBR    = false;
-    opt::BBS    = false;
-    opt::DCI    = false;
-    opt::SUB    = false;
-    opt::CO     = false;
-    opt::GENC   = false;
-    opt::MVO    = false;
+    preset(opt::STR, true);
+    preset(opt::STRAES, false);
+    preset(opt::WSTR, false);
+    preset(opt::FLA, false);
+    preset(opt::BCF, false);
+    preset(opt::BBR, false);
+    preset(opt::BBS, false);
+    preset(opt::DCI, false);
+    preset(opt::SUB, false);
+    preset(opt::CO, false);
+    preset(opt::GENC, false);
+    preset(opt::MVO, false);
   } else if (Profile.equals_insensitive("balanced")) {
-    opt::STR    = true;
-    opt::STRAES = false;
-    opt::WSTR   = true;
-    opt::BCF    = true;
-    opt::BCFProb = 20;
-    opt::BCFIter = 1;
-    opt::BBR    = true;
-    opt::BBS    = true;
-    opt::DCI    = true;
-    opt::GENC   = true;
-    opt::MVO    = true;
-    opt::FLA    = false;
-    opt::SUB    = false;
-    opt::CO     = false;
+    preset(opt::STR, true);
+    preset(opt::STRAES, false);
+    preset(opt::WSTR, true);
+    preset(opt::BCF, true);
+    preset(opt::BCFProb, 20);
+    preset(opt::BCFIter, 1);
+    preset(opt::BBR, true);
+    preset(opt::BBS, true);
+    preset(opt::DCI, true);
+    preset(opt::GENC, true);
+    preset(opt::MVO, true);
+    preset(opt::FLA, false);
+    preset(opt::SUB, false);
+    preset(opt::CO, false);
   } else if (Profile.equals_insensitive("strong")) {
-    opt::STR    = true;
-    opt::STRAES = true;
-    opt::WSTR   = true;
-    opt::FLA    = true;
-    opt::BCF    = true;
-    opt::BCFProb = 50;
-    opt::BCFIter = 2;
-    opt::BBR    = true;
-    opt::BBS    = true;
-    opt::DCI    = true;
-    opt::SUB    = true;
-    opt::SUBIter = 2;
-    opt::CO     = true;
-    opt::GENC   = true;
-    opt::MVO    = true;
-    opt::Honey  = true;
-    opt::LT     = true;
-    opt::IBR    = true;
-    opt::SV     = true;
+    preset(opt::STR, true);
+    preset(opt::STRAES, true);
+    preset(opt::WSTR, true);
+    preset(opt::FLA, true);
+    preset(opt::BCF, true);
+    preset(opt::BCFProb, 50);
+    preset(opt::BCFIter, 2);
+    preset(opt::BBR, true);
+    preset(opt::BBS, true);
+    preset(opt::DCI, true);
+    preset(opt::SUB, true);
+    preset(opt::SUBIter, 2);
+    preset(opt::CO, true);
+    preset(opt::GENC, true);
+    preset(opt::MVO, true);
+    preset(opt::Honey, true);
+    preset(opt::LT, true);
+    preset(opt::IBR, true);
+    preset(opt::SV, true);
   }
   // "custom" or unknown: no-op (use individual CLI flags)
 }
@@ -114,6 +134,8 @@ static void applyProfile(StringRef Profile) {
 
 static void applyPassesObject(const json::Object &Passes) {
   auto getBool = [&](StringRef Key, cl::opt<bool> &Flag) {
+    if (setByUser(Flag))
+      return;
     if (auto V = Passes.getBoolean(Key))
       Flag = *V;
   };
@@ -144,12 +166,15 @@ static void applyPassesObject(const json::Object &Passes) {
   getBool("pe",     opt::PE);
   getBool("telemetry", opt::Telemetry);
 
-  if (auto DwarfVal = Passes.getString("dwarf"))
-    opt::DWARFMode = DwarfVal->str();
+  if (!setByUser(opt::DWARFMode))
+    if (auto DwarfVal = Passes.getString("dwarf"))
+      opt::DWARFMode = DwarfVal->str();
 }
 
 static void applyTuningObject(const json::Object &Tuning) {
   auto getU32 = [&](StringRef Key, cl::opt<uint32_t> &Flag) {
+    if (setByUser(Flag))
+      return;
     if (auto V = Tuning.getInteger(Key))
       Flag = static_cast<uint32_t>(*V);
   };
@@ -158,23 +183,31 @@ static void applyTuningObject(const json::Object &Tuning) {
   getU32("sub_iter", opt::SUBIter);
   getU32("dci_prob", opt::DCIProb);
 
-  if (auto Seed = Tuning.getInteger("seed"))
-    opt::Seed = static_cast<uint64_t>(*Seed);
+  if (!setByUser(opt::Seed))
+    if (auto Seed = Tuning.getInteger("seed"))
+      opt::Seed = static_cast<uint64_t>(*Seed);
 }
 
-// ---- Pass entry point -------------------------------------------------------
+// ---- Entry point ------------------------------------------------------------
 
-PreservedAnalyses ConfigLoaderPass::run(Module &M, ModuleAnalysisManager &) {
+void loadConfigFileIfSpecified() {
+  // Parse at most once. Plugin.cpp calls this every time it builds a pipeline,
+  // and re-applying would undo any flag a later caller had adjusted.
+  static bool Loaded = false;
+  if (Loaded)
+    return;
+  Loaded = true;
+
   StringRef ConfigPath = kagura::opt::ConfigFile;
   if (ConfigPath.empty())
-    return PreservedAnalyses::all();
+    return;
 
   // Load file
   auto BufOrErr = MemoryBuffer::getFile(ConfigPath);
   if (!BufOrErr) {
     errs() << "[kagura] ConfigLoader: cannot open " << ConfigPath
            << ": " << BufOrErr.getError().message() << "\n";
-    return PreservedAnalyses::all();
+    return;
   }
 
   // Parse JSON
@@ -182,13 +215,13 @@ PreservedAnalyses ConfigLoaderPass::run(Module &M, ModuleAnalysisManager &) {
   if (!JsonOrErr) {
     errs() << "[kagura] ConfigLoader: JSON parse error in " << ConfigPath
            << ": " << toString(JsonOrErr.takeError()) << "\n";
-    return PreservedAnalyses::all();
+    return;
   }
 
   auto *Root = JsonOrErr->getAsObject();
   if (!Root) {
     errs() << "[kagura] ConfigLoader: root must be a JSON object\n";
-    return PreservedAnalyses::all();
+    return;
   }
 
   // 4.6.9: Multi-flavor support — select a flavor-specific config block if
@@ -259,7 +292,16 @@ PreservedAnalyses ConfigLoaderPass::run(Module &M, ModuleAnalysisManager &) {
     concatArray(FlavorRoot, "denylist",  opt::DenyList);
     concatArray(FlavorRoot, "protect",   opt::ProtectList);
   }
+}
 
+// ---- Pass entry point -------------------------------------------------------
+
+/// Kept so `opt -passes=kagura-config` stays valid. The real work happens in
+/// loadConfigFileIfSpecified(), which Plugin.cpp calls before it builds the
+/// pipeline; by the time a pass runs it is far too late to influence which
+/// passes were added.
+PreservedAnalyses ConfigLoaderPass::run(Module &, ModuleAnalysisManager &) {
+  loadConfigFileIfSpecified();
   return PreservedAnalyses::all(); // flags only, no IR modification
 }
 

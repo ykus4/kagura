@@ -88,8 +88,16 @@ llvm::PassPluginLibraryInfo getKaguraPluginInfo() {
                 [](ModulePassManager &MPM, OptimizationLevel OL) {
 #endif
                   // --- Load JSON config / apply profile preset ---
-                  if (!opt::ConfigFile.empty())
-                    MPM.addPass(ConfigLoaderPass());
+                  //
+                  // This has to happen HERE, not as a pass. Everything below
+                  // reads opt::* to decide what to add to the pipeline, and a
+                  // pass added to MPM does not run until the pipeline is
+                  // already fixed. Adding ConfigLoaderPass here instead — as
+                  // this code used to — meant the JSON policy file could never
+                  // influence pass selection, so -kagura-config was silently a
+                  // no-op for the -fpass-plugin entry point documented in the
+                  // README.
+                  loadConfigFileIfSpecified();
 
                   // --- LTO / ThinLTO pipeline gating ---
                   // During link-time optimisation the IR is often an
