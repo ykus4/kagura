@@ -1,9 +1,9 @@
 # 4.6.11: Bazel support for KaguraObfuscator
 #
 # This BUILD file exposes:
-#   //integration/bazel:kagura_runtime    — the runtime C library
-#   //integration/bazel:kagura_plugin     — the LLVM pass plugin (.so/.dylib)
-#   //integration/bazel:kagura_flags      — flag set for cc_binary/cc_library
+#   //integration/bazel:kagura_runtime         — alias to the runtime C library
+#   //integration/bazel:kagura_plugin_binary   — the LLVM pass plugin (.so/.dylib)
+#   //integration/bazel:profiles               — the shared JSON profiles
 #
 # Usage:
 #   load("@kagura//integration/bazel:kagura.bzl", "kagura_cc_binary")
@@ -12,66 +12,85 @@
 #       srcs = ["main.cc"],
 #       kagura_passes = ["-kagura-fla", "-kagura-sub", "-kagura-str"],
 #   )
+#
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ REQUIRED: a BUILD file at the repository ROOT                            │
+# │                                                                          │
+# │ Bazel packages cannot see outside themselves — `glob(["../../runtime/    │
+# │ *.c"])` is rejected outright (uplevel references are not allowed in glob │
+# │ patterns) and a label like `//integration/bazel:../../runtime/aes.c` is  │
+# │ not expressible. The runtime therefore has to be declared from a package │
+# │ that actually contains runtime/, i.e. the repository root.               │
+# │                                                                          │
+# │ Create /BUILD.bazel in the kagura checkout with:                         │
+# │                                                                          │
+# │   load("//integration/bazel:kagura.bzl", "kagura_runtime_library")       │
+# │   package(default_visibility = ["//visibility:public"])                  │
+# │   kagura_runtime_library(name = "kagura_runtime")                        │
+# │   exports_files(glob(["integration/profiles/*.json"]))                   │
+# │                                                                          │
+# │ (Alternatively drop a BUILD.bazel into runtime/ and change the aliases   │
+# │ below to point at //runtime:kagura_runtime.)                             │
+# └──────────────────────────────────────────────────────────────────────────┘
 
 package(default_visibility = ["//visibility:public"])
 
 # ---- Runtime library -------------------------------------------------------
+# Deliberately an alias, not a cc_library with a glob: a glob written here can
+# only ever match files under integration/bazel/, so defining the library here
+# would silently produce an EMPTY archive (which is exactly what the previous
+# `glob(["../../runtime/*.c"])` did once runtime/ grew subdirectories).
+# An unresolvable alias fails loudly instead.
 
-RUNTIME_SRCS = glob(
-    ["../../runtime/*.c"],
-    exclude = [
-        # Android-only files (excluded on non-Android platforms)
-        "../../runtime/jni_hook_detection.c",
-        "../../runtime/play_integrity.c",
-        "../../runtime/safetynet_compat.c",
-        "../../runtime/art_environment.c",
-        "../../runtime/proc_inspection.c",
-        "../../runtime/seccomp_checks.c",
-        "../../runtime/load_order.c",
-    ],
+alias(
+    name = "kagura_runtime",
+    actual = "@kagura//:kagura_runtime",
 )
 
-cc_library(
-    name = "kagura_runtime",
-    srcs = RUNTIME_SRCS,
-    hdrs = glob(["../../include/**/*.h"]),
-    includes = ["../../include"],
-    copts = ["-std=c11"],
-    linkopts = select({
-        "@platforms//os:linux": ["-ldl"],
-        "@platforms//os:macos": [],
-        "//conditions:default": [],
-    }),
+# ---- Shared obfuscation profiles -------------------------------------------
+# integration/profiles/ has no BUILD file of its own, so its files also belong
+# to the root package.
+
+alias(
+    name = "profile_fast",
+    actual = "@kagura//:integration/profiles/fast.json",
+)
+
+alias(
+    name = "profile_balanced",
+    actual = "@kagura//:integration/profiles/balanced.json",
+)
+
+alias(
+    name = "profile_strong",
+    actual = "@kagura//:integration/profiles/strong.json",
 )
 
 # ---- LLVM pass plugin (prebuilt) -------------------------------------------
-# Users must build the plugin with CMake first (cmake --build .) and point
-# KAGURA_PLUGIN_PATH to the resulting .dylib / .so.
+# Users must build the plugin with CMake first (cmake --build .) and expose the
+# resulting .dylib / .so / .dll through the @kagura_prebuilt repository.
 #
 # Alternatively, if building kagura from source inside the Bazel workspace,
 # replace the filegroup with a cmake_external() rule (requires bazel_skylib
 # and rules_foreign_cc).
+#
+# NOTE the artifact is named KaguraObfuscator.{dylib,so,dll} — CMake is
+# configured with no "lib" prefix, see .github/workflows/release.yml. The
+# @kagura_prebuilt repository picks the right extension for the host; see the
+# WORKSPACE snippet in README.md.
 
-filegroup(
+alias(
     name = "kagura_plugin_binary",
-    srcs = select({
-        "@platforms//os:macos": ["@kagura_prebuilt//:libKaguraObfuscator.dylib"],
-        "@platforms//os:linux": ["@kagura_prebuilt//:libKaguraObfuscator.so"],
-        "//conditions:default": [],
-    }),
+    actual = "@kagura_prebuilt//:KaguraObfuscator",
 )
 
-# ---- Toolchain fragment with kagura flags ----------------------------------
-# This is a Bazel toolchain feature that injects kagura flags into every
-# C/C++ compilation action when the feature is enabled.
-
-# NOTE: Full Bazel toolchain feature support requires starlark rules.
-# See kagura.bzl in the same package for the kagura_cc_binary/kagura_cc_library
-# wrappers that inject these flags via copt/linkopts.
+# ---- Default pass set ------------------------------------------------------
+# Prefer -kagura-config=<profile.json> (see integration/profiles/README.md);
+# this list is the explicit-flag fallback used by kagura.bzl.
 
 KAGURA_DEFAULT_PASSES = [
-    "-kagura-fla",
-    "-kagura-sub",
     "-kagura-str",
+    "-kagura-fla",
     "-kagura-bcf",
+    "-kagura-sub",
 ]
