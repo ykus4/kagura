@@ -52,6 +52,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -840,12 +841,23 @@ static void relaxAttributes(Function &F) {
     F.removeFnAttr(K);
   // A `range` return attribute is a promise about the value the *original* body
   // produced; keep the interpreter's result from being folded against it.
+  // The attribute was introduced in LLVM 19.
+#if LLVM_VERSION_MAJOR >= 19
   F.removeRetAttr(Attribute::Range);
-  for (unsigned I = 0, N = F.arg_size(); I < N; ++I)
+#endif
+
+  for (unsigned I = 0, N = F.arg_size(); I < N; ++I) {
     for (Attribute::AttrKind K :
          {Attribute::ReadNone, Attribute::ReadOnly, Attribute::WriteOnly,
-          Attribute::NoFree, Attribute::Captures})
+          Attribute::NoFree})
       F.removeParamAttr(I, K);
+    // LLVM 21 replaced the `nocapture` attribute with `captures(...)`.
+#if LLVM_VERSION_MAJOR >= 21
+    F.removeParamAttr(I, Attribute::Captures);
+#else
+    F.removeParamAttr(I, Attribute::NoCapture);
+#endif
+  }
 }
 
 static void buildTrampoline(Function &F, const VMProgram &P, PRNG &RNG) {
