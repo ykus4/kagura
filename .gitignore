@@ -7,8 +7,30 @@ build_*/
 .cache/
 Testing/
 
-# Paper: LaTeX/PDF artifacts (not tracked)
-paper/
+# Python virtualenvs
+# (these only stayed out of `git status` because virtualenv writes its own
+#  .venv/.gitignore containing "*" — be explicit)
+.venv/
+.venv-docs/
+
+# Paper: LaTeX build artifacts only.
+# paper/paper.tex, paper/refs.bib, paper/IEEEtran.{cls,bst} and
+# paper/results/eval_summary.json are SOURCE for the Zenodo-published paper
+# (DOI 10.5281/zenodo.20361447) and are meant to be tracked.
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.toc
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+paper/*.pdf
+# Compiled evaluation binaries produced by scripts/benchmarks (Mach-O / ELF
+# executables, ~4.8 MB). The numbers derived from them live in
+# paper/results/eval_summary.json, which IS tracked.
+paper/results/game_*
 
 # MkDocs build output
 site/
