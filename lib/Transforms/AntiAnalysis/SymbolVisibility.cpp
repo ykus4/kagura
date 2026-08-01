@@ -13,10 +13,14 @@
 // Algorithm
 // ---------
 // For each Function and GlobalVariable in the module:
-//   - Skip if it has external linkage AND is listed in the user-supplied
-//     allowlist (symbols that must remain visible for the public API).
-//   - Skip if it has external linkage and no definition (declarations).
-//   - Otherwise, if current visibility is Default, change to Hidden.
+//   - Skip declarations (they name symbols defined elsewhere).
+//   - Skip anything already non-default-visibility, and kagura's own runtime
+//     symbols.
+//   - Skip anything listed in the user-supplied keep list (the public API).
+//   - Skip local (internal / private) linkage.  Those symbols are already
+//     absent from the dynamic symbol table, so hidden visibility buys nothing,
+//     and LLVM asserts "local linkage requires default visibility" if you try.
+//   - Everything left is an exported definition: change it to Hidden.
 //
 // CLI flags
 // ---------
@@ -62,9 +66,17 @@ static bool shouldHide(const GlobalValue &GV,
   // Keep kagura runtime symbols visible (they're referenced by the runtime lib)
   if (GV.getName().starts_with("kagura_"))
     return false;
-  // Only touch internal/private/linkonce linkage, or external definitions
-  // that are not part of the public API (not in allowlist, no external users).
-  // We treat ExternalLinkage conservatively: hide only if NOT in allowlist.
+  // Local linkage (internal / private) is already invisible outside the
+  // translation unit — it never reaches the dynamic symbol table, so there is
+  // nothing for hidden visibility to add.  More importantly LLVM forbids the
+  // combination outright: GlobalValue::setVisibility() asserts
+  //   "local linkage requires default visibility"
+  // and an assertions-enabled build crashes here rather than emitting IR.
+  if (GV.hasLocalLinkage())
+    return false;
+  // What is left is a definition with external (or linkonce/weak) linkage that
+  // is not on the keep list: exactly the symbols that would otherwise be
+  // exported and dlsym()-able.  Hide those.
   return true;
 }
 
