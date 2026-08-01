@@ -72,13 +72,16 @@ namespace kagura {
 // --------------------------------------------------------------------------
 
 /// Returns true if a call instruction is safe to extract into a helper:
-///   - Direct call to a known function (not indirect)
+///   - Direct call to a known function (not indirect, not inline asm)
 ///   - Not an invoke (no EH edge)
 ///   - Not a call to an intrinsic (they may have special semantics / sideband
 ///     effects that break when moved to a different function frame)
 ///   - Not a variadic call (ABI complexity)
+///   - Not a musttail call (it must be immediately followed by a matching ret)
 static bool isLeafSafeCall(const CallInst &CI) {
+  if (CI.isInlineAsm()) return false;
   if (CI.isIndirectCall()) return false;
+  if (CI.isMustTailCall()) return false;
   Function *Callee = CI.getCalledFunction();
   if (!Callee) return false;
   if (Callee->isIntrinsic()) return false;
@@ -129,6 +132,46 @@ static std::vector<Value *> collectLiveIns(BasicBlock *BB) {
   return LiveIns;
 }
 
+/// Collect all instructions defined *inside* BB whose value is used *outside*
+/// BB.  Every one of them has to be handed back to the caller once the block
+/// has been outlined, otherwise the surrounding function is left referring to
+/// instructions that no longer exist.
+static std::vector<Instruction *> collectLiveOuts(BasicBlock *BB) {
+  std::vector<Instruction *> LiveOuts;
+  for (Instruction &I : *BB) {
+    if (I.isTerminator() || I.getType()->isVoidTy())
+      continue;
+    for (User *U : I.users()) {
+      auto *UI = dyn_cast<Instruction>(U);
+      if (!UI || UI->getParent() != BB) {
+        LiveOuts.push_back(&I);
+        break;
+      }
+    }
+  }
+  return LiveOuts;
+}
+
+/// Returns true if BB holds something that cannot be relocated into another
+/// function frame even though its instructions look harmless:
+///   - allocas (their storage would die when the helper returns)
+///   - token-typed values (cannot be spilled through memory)
+///   - swifterror values (need matching parameter attributes)
+static bool hasUnrelocatableInsts(const BasicBlock &BB) {
+  for (const Instruction &I : BB) {
+    if (isa<AllocaInst>(I))
+      return true;
+    if (I.getType()->isTokenTy())
+      return true;
+    if (I.isEHPad())
+      return true;
+    for (const Use &U : I.operands())
+      if (U.get()->isSwiftError())
+        return true;
+  }
+  return false;
+}
+
 /// Build an obfuscated name for the outlined helper.
 static std::string makeHelperName(const Function &Parent, unsigned Index,
                                   PRNG &RNG) {
@@ -172,25 +215,50 @@ static bool extractBlock(BasicBlock *BB, unsigned Index, PRNG &RNG) {
   if (isExitBlock(*BB))
     return false;
 
+  // Skip blocks holding values that cannot survive the move to another frame.
+  if (hasUnrelocatableInsts(*BB))
+    return false;
+
   // We only handle blocks with exactly one unconditional branch as terminator.
   auto *Term = dyn_cast<BranchInst>(BB->getTerminator());
   if (!Term || !Term->isUnconditional())
     return false;
 
-  BasicBlock *Succ = Term->getSuccessor(0);
+  // Nothing to outline if the block is just a branch.
+  if (&BB->front() == Term)
+    return false;
 
-  // --- Live-in computation ---
+  // --- Live-in / live-out computation ---
 
   std::vector<Value *> LiveIns = collectLiveIns(BB);
-  if (LiveIns.size() > MaxArgs)
+
+  // Values computed in BB but consumed by the rest of the function.  The helper
+  // returns void, so each of them is handed back through a caller-allocated
+  // out-parameter: the helper stores into it, the caller reloads it right after
+  // the call and rewires the outside uses to that load.
+  //
+  // Getting this wrong is what made the pass miscompile: the previous version
+  // simply erased BB's instructions, leaving every outside user (and every
+  // later instruction of BB itself, since the erase ran front-to-back) pointing
+  // at freed memory.  The recycled allocations then showed up as
+  // "PHI node operands are not the same type as the result" — or crashed opt
+  // outright.
+  std::vector<Instruction *> LiveOuts = collectLiveOuts(BB);
+
+  if (LiveIns.size() + LiveOuts.size() > MaxArgs)
     return false; // too many arguments
 
   // --- Build the helper function signature ---
 
   std::vector<Type *> ParamTypes;
-  ParamTypes.reserve(LiveIns.size());
+  ParamTypes.reserve(LiveIns.size() + LiveOuts.size());
   for (Value *V : LiveIns)
     ParamTypes.push_back(V->getType());
+  // The out-parameters point at allocas, so they must use the target's alloca
+  // address space rather than a hard-coded 0.
+  Type *PtrTy = PointerType::get(Ctx, M->getDataLayout().getAllocaAddrSpace());
+  for (unsigned I = 0, E = LiveOuts.size(); I != E; ++I)
+    ParamTypes.push_back(PtrTy);
 
   FunctionType *HelperTy =
       FunctionType::get(Type::getVoidTy(Ctx), ParamTypes, /*isVarArg=*/false);
@@ -199,18 +267,28 @@ static bool extractBlock(BasicBlock *BB, unsigned Index, PRNG &RNG) {
   Function *Helper = Function::Create(HelperTy, GlobalValue::InternalLinkage,
                                       HelperName, M);
   Helper->setCallingConv(CallingConv::C);
-  // Mark as always-inline so the call we insert can be further optimized
-  // away in release builds if desired, while still fragmenting debug views.
-  Helper->addFnAttr(Attribute::NoUnwind);
+  // Only claim nounwind when nothing in the block can actually throw, otherwise
+  // an unwind edge through the helper would be miscompiled into a terminate.
+  if (llvm::all_of(*BB, [](const Instruction &I) {
+        const auto *CI = dyn_cast<CallInst>(&I);
+        return !CI || CI->doesNotThrow();
+      }))
+    Helper->addFnAttr(Attribute::NoUnwind);
 
   // --- Build a mapping: original live-in Value* -> helper argument ---
 
   ValueToValueMapTy VMap;
+  SmallVector<Argument *, 4> OutArgs;
   {
     unsigned Idx = 0;
     for (Argument &Arg : Helper->args()) {
-      Arg.setName(LiveIns[Idx]->getName());
-      VMap[LiveIns[Idx]] = &Arg;
+      if (Idx < LiveIns.size()) {
+        Arg.setName(LiveIns[Idx]->getName());
+        VMap[LiveIns[Idx]] = &Arg;
+      } else {
+        Arg.setName(LiveOuts[Idx - LiveIns.size()]->getName() + ".out");
+        OutArgs.push_back(&Arg);
+      }
       ++Idx;
     }
   }
@@ -224,6 +302,12 @@ static bool extractBlock(BasicBlock *BB, unsigned Index, PRNG &RNG) {
   for (auto It = BB->begin(), End = --BB->end(); It != End; ++It) {
     Instruction *Clone = It->clone();
     Clone->setName(It->getName());
+    // The clone lives in a different function, so a !dbg location scoped to
+    // the parent's DISubprogram would be rejected by the verifier.
+    Clone->setDebugLoc(DebugLoc());
+    // `tail` is only a hint; drop it rather than re-prove it in the new frame.
+    if (auto *CloneCall = dyn_cast<CallInst>(Clone))
+      CloneCall->setTailCallKind(CallInst::TCK_None);
     Clone->insertInto(HelperEntry, HelperEntry->end());
     // Record the mapping so later clones can reference this value.
     VMap[&*It] = Clone;
@@ -239,13 +323,24 @@ static bool extractBlock(BasicBlock *BB, unsigned Index, PRNG &RNG) {
     }
   }
 
-  // Terminate helper with ret void.
-  IRBuilder<>(HelperEntry).CreateRetVoid();
+  // Write every live-out back through its out-parameter, then return.
+  IRBuilder<> HelperB(HelperEntry);
+  for (unsigned I = 0, E = LiveOuts.size(); I != E; ++I)
+    HelperB.CreateStore(VMap[LiveOuts[I]], OutArgs[I]);
+  HelperB.CreateRetVoid();
 
   // --- Replace BB's body in the parent function with a call + branch ---
 
-  // Collect instructions to erase (everything except the terminator which
-  // we'll repurpose).
+  // One static alloca per live-out, in the parent's entry block so that
+  // extracting a block inside a loop does not grow the stack per iteration.
+  IRBuilder<> AllocaB(&*ParentFn->getEntryBlock().getFirstInsertionPt());
+  SmallVector<Value *, 4> OutSlots;
+  OutSlots.reserve(LiveOuts.size());
+  for (Instruction *LO : LiveOuts)
+    OutSlots.push_back(
+        AllocaB.CreateAlloca(LO->getType(), nullptr, LO->getName() + ".slot"));
+
+  // Snapshot the original instructions before we add anything to BB.
   std::vector<Instruction *> ToErase;
   for (auto It = BB->begin(), End = --BB->end(); It != End; ++It)
     ToErase.push_back(&*It);
@@ -253,27 +348,32 @@ static bool extractBlock(BasicBlock *BB, unsigned Index, PRNG &RNG) {
   // Insert the call to the helper before the terminator.
   IRBuilder<> CallBuilder(BB->getTerminator());
   SmallVector<Value *, 8> Args(LiveIns.begin(), LiveIns.end());
+  Args.append(OutSlots.begin(), OutSlots.end());
   CallBuilder.CreateCall(HelperTy, Helper, Args);
 
-  // The existing unconditional branch to Succ stays as-is — we just remove
-  // the original instructions that were doing the work.
-  for (Instruction *I : ToErase)
-    I->eraseFromParent();
+  // Reload the live-outs and redirect every use outside BB to the reloaded
+  // value.  The loads sit at the end of BB, which dominates every block that
+  // the original definitions dominated, so this is always legal — including
+  // PHI uses whose incoming edge comes from BB.
+  for (unsigned I = 0, E = LiveOuts.size(); I != E; ++I) {
+    Value *Reloaded = CallBuilder.CreateLoad(LiveOuts[I]->getType(), OutSlots[I],
+                                             LiveOuts[I]->getName() + ".reload");
+    LiveOuts[I]->replaceUsesOutsideBlock(Reloaded, BB);
+  }
 
-  // Fix up any PHI nodes in Succ that referenced values defined in BB.
-  // After extraction, those values no longer exist in BB; the helper computed
-  // them but returns void.  Replace such PHI incoming values with undef so
-  // the IR stays valid.  (In practice, collectLiveIns ensures that values
-  // defined inside BB are not used outside it — but Succ's PHIs might have
-  // been referencing BB as a predecessor for values defined *before* BB.)
-  for (PHINode &Phi : Succ->phis()) {
-    int Idx = Phi.getBasicBlockIndex(BB);
-    if (Idx < 0) continue;
-    Value *IncomingVal = Phi.getIncomingValue(Idx);
-    // If the incoming value is defined inside BB (now erased), replace with undef.
-    if (auto *DefInst = dyn_cast<Instruction>(IncomingVal))
-      if (DefInst->getParent() == BB)
-        Phi.setIncomingValue(Idx, UndefValue::get(Phi.getType()));
+  // The existing unconditional branch to Succ stays as-is — we just remove
+  // the original instructions that were doing the work.  Erase back-to-front:
+  // a value defined in BB can only be used by instructions *later* in BB (the
+  // block has no PHIs), so by the time we reach a definition all of its
+  // in-block users are already gone, and all of its out-of-block users have
+  // been rewired to the reload above.  Erasing front-to-back — what the old
+  // code did — destroyed values that were still referenced.
+  for (auto It = ToErase.rbegin(), End = ToErase.rend(); It != End; ++It) {
+    Instruction *Orig = *It;
+    // Unreachable by the argument above; stop rather than free a live value.
+    if (!Orig->use_empty())
+      break;
+    Orig->eraseFromParent();
   }
 
   return true;

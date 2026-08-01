@@ -197,16 +197,32 @@ static bool splitLoopCounter(Loop *L, IRBuilder<> &EntryB) {
   int PreIdx  = IndVar->getBasicBlockIndex(Preheader);
   Value *Init = IndVar->getIncomingValue(PreIdx);
 
+  // Determine step value.
+  Value *Step = (StepInst->getOperand(0) == IndVar) ? StepInst->getOperand(1)
+                                                      : StepInst->getOperand(0);
+
+  // The recombination sequence is emitted at the top of the header, so `Step`
+  // has to be available there.  Constants and arguments always are; an
+  // instruction only is when it is defined outside the loop (a value defined
+  // outside a natural loop but used inside it necessarily dominates the
+  // header).  A step computed inside the loop — e.g. in the latch — would not
+  // dominate the new use, so bail out before emitting anything rather than
+  // producing IR that fails the dominance check.
+  if (auto *StepInstr = dyn_cast<Instruction>(Step))
+    if (L->contains(StepInstr->getParent()))
+      return false;
+
+  // The header must have a position where non-PHI instructions may live; a
+  // header that is an EH pad cannot host the recombination sequence.
+  BasicBlock::iterator HeaderInsertPt = Header->getFirstInsertionPt();
+  if (HeaderInsertPt == Header->end())
+    return false;
+
   // Ensure init is i64.
   IRBuilder<> PreB(Preheader->getTerminator());
   Value *Init64 = Init->getType()->isIntegerTy(64)
                       ? Init
                       : PreB.CreateZExt(Init, I64, "lt.init64");
-
-  // Determine step value.
-  Value *Step = (StepInst->getOperand(0) == IndVar) ? StepInst->getOperand(1)
-                                                      : StepInst->getOperand(0);
-  IRBuilder<> HeaderB(&*Header->getFirstInsertionPt());
 
   // Split init into low/high halves.
   Value *InitLow  = PreB.CreateTrunc(Init64, I32, "lt.init_low");
@@ -222,8 +238,16 @@ static bool splitLoopCounter(Loop *L, IRBuilder<> &EntryB) {
   PhiLow->addIncoming(InitLow,  Preheader);
   PhiHigh->addIncoming(InitHigh, Preheader);
 
-  // Recombine: i = i_low | (i_high << 32)  — insert right after the two phis.
-  IRBuilder<> CombineB(PhiHigh->getNextNode());
+  // Recombine: i = i_low | (i_high << 32).
+  //
+  // This must be emitted after *every* PHI in the header, not merely after the
+  // two we just created: `PhiHigh->getNextNode()` is normally the original
+  // induction PHI (and any other header PHIs), so anchoring the builder there
+  // interleaves non-PHI instructions with the remaining PHIs and yields
+  // "PHI nodes not grouped at top of basic block".  HeaderInsertPt was taken
+  // before the new PHIs were inserted and still points at the first non-PHI
+  // instruction of the header.
+  IRBuilder<> CombineB(Header, HeaderInsertPt);
   Value *HighExt  = CombineB.CreateZExt(PhiHigh, I64, "lt.high_ext");
   Value *HighShl  = CombineB.CreateShl(HighExt, ConstantInt::get(I64, 32),
                                         "lt.high_shl");
@@ -253,17 +277,19 @@ static bool splitLoopCounter(Loop *L, IRBuilder<> &EntryB) {
   if (IndVar->getType() != I64)
     Replacement = CombineB.CreateTrunc(Combined, IndVar->getType(), "lt.trunc");
 
-  // We cannot RAUW IndVar with Replacement if Replacement is defined after
-  // IndVar in the same block; but Combined is inserted right after the new phis
-  // (before the original IndVar), so this is safe as long as we skip the
-  // phis themselves when replacing.
+  // Replacement lives after all header PHIs, so it dominates every use the
+  // original PHI could legally have had (uses in the header below the PHI
+  // block, uses in blocks the header dominates, and PHI uses whose incoming
+  // block is dominated by the header).
   IndVar->replaceAllUsesWith(Replacement);
 
-  // Remove the now-unused original step instruction and PHI.
-  if (StepInst->use_empty())
-    StepInst->eraseFromParent();
+  // Remove the now-unused original PHI and, if nothing else referenced it, its
+  // step instruction.  The PHI has to go first: it is the (sole remaining) user
+  // of the step instruction via its latch incoming value.
   if (IndVar->use_empty())
     IndVar->eraseFromParent();
+  if (StepInst->use_empty())
+    StepInst->eraseFromParent();
 
   return true;
 }
