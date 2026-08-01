@@ -151,6 +151,55 @@ static bool obfuscateFPConstant(Instruction *I, unsigned OpIdx,
   return true;
 }
 
+/// Can operand OpIdx of I be replaced by a computed value?
+///
+/// Several instructions require a *literal* constant in particular operand
+/// slots, and the verifier rejects anything else. Replacing an operand with an
+/// MBA expression there produces a module LLVM refuses to compile — which is
+/// what happened once this pass started working: a `switch` case value became
+/// `i8 %co.ar2` and clang aborted with "Case value is not a constant integer".
+static bool operandIsReplaceable(const Instruction &I, unsigned OpIdx) {
+  // A switch's case values must be ConstantInt. Only the condition (operand 0)
+  // is a free-form value.
+  if (isa<SwitchInst>(&I))
+    return OpIdx == 0;
+
+  // PHI incoming values belong to predecessor edges; a value computed here
+  // would not dominate its use.
+  if (isa<PHINode>(&I))
+    return false;
+
+  // An EH pad has to remain the first instruction of its block, so nothing can
+  // be inserted in front of it.
+  if (I.isEHPad())
+    return false;
+
+  // landingpad clauses must be Constants.
+  if (isa<LandingPadInst>(&I))
+    return false;
+
+  // Intrinsics take immarg parameters that must be literals, and the callee
+  // operand must stay a Function. Covers call, invoke and callbr.
+  if (isa<CallBase>(&I))
+    return false;
+
+  // GEP indices into a struct type must be constant i32.
+  if (isa<GetElementPtrInst>(&I))
+    return false;
+
+  // The allocated count may legally be dynamic, but turning a static alloca
+  // into a dynamic one changes stack behaviour for no obfuscation benefit.
+  if (isa<AllocaInst>(&I))
+    return false;
+
+  // ShuffleVector's mask is a separate field in current LLVM but was an
+  // operand historically; skip it so this stays correct across 17..22.
+  if (isa<ShuffleVectorInst>(&I))
+    return false;
+
+  return true;
+}
+
 static bool obfuscateFunction(Function &F, PRNG &RNG) {
   bool Changed = false;
 
@@ -158,13 +207,9 @@ static bool obfuscateFunction(Function &F, PRNG &RNG) {
     if (BB.getName().starts_with("kagura."))
       continue;
     for (auto &I : BB) {
-      if (isa<PHINode>(&I) || isa<AllocaInst>(&I))
-        continue;
-      if (isa<GetElementPtrInst>(&I))
-        continue;
-      if (isa<CallInst>(&I) || isa<InvokeInst>(&I))
-        continue;
       for (unsigned OpIdx = 0; OpIdx < I.getNumOperands(); ++OpIdx) {
+        if (!operandIsReplaceable(I, OpIdx))
+          continue;
         Value *Op = I.getOperand(OpIdx);
         // 30% chance per constant to avoid code bloat
         if (RNG.nextRange(0, 100) >= 30)

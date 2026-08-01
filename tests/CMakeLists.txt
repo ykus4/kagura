@@ -132,19 +132,30 @@ set(KAGURA_LINK_SUBJECTS
   ${CMAKE_CURRENT_SOURCE_DIR}/pass-inputs/control_flow_test.c
 )
 
+# Function-level passes must be wrapped in function(...) for opt; module-level
+# passes are named directly. The registry already records which is which, so
+# read the macro name alongside the CLI name rather than maintaining a list.
 file(STRINGS ${PROJECT_SOURCE_DIR}/lib/Transforms/PassRegistry.def
      KAGURA_PASS_ROWS
      REGEX "^KAGURA_(FN|MOD)_PASS\\(")
 
 foreach(_row IN LISTS KAGURA_PASS_ROWS)
-  if(_row MATCHES "\"(kagura-[a-z0-9-]+)\"")
-    set(_cli ${CMAKE_MATCH_1})
+  if(_row MATCHES "^KAGURA_(FN|MOD)_PASS\\([^\"]*\"(kagura-[a-z0-9-]+)\"")
+    set(_kind ${CMAKE_MATCH_1})
+    set(_cli  ${CMAKE_MATCH_2})
+    if(_kind STREQUAL "FN")
+      set(_pipeline "function(${_cli})")
+    else()
+      set(_pipeline "${_cli}")
+    endif()
     add_test(NAME link_${_cli}
       COMMAND ${CMAKE_COMMAND}
         -DCLANG=${LLVM_BIN}/clang
+        -DOPT=${LLVM_BIN}/opt
         -DPLUGIN=${KAGURA_PLUGIN}
         -DRUNTIME=$<TARGET_FILE:kagura_runtime>
-        -DFLAG=${_cli}
+        -DPIPELINE=${_pipeline}
+        -DLABEL=${_cli}
         "-DSOURCES=${KAGURA_LINK_SUBJECTS}"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/run_link_test.cmake
     )
