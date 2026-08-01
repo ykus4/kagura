@@ -318,7 +318,7 @@ static bool obfuscateLoop(Loop *L, Function &F,
 
 PreservedAnalyses LoopTransformPass::run(Function &F,
                                           FunctionAnalysisManager &FAM) {
-  if (!shouldObfuscate(F, "lt", kagura::opt::LT))
+  if (!shouldObfuscate(F, "lt"))
     return PreservedAnalyses::all();
   if (F.isDeclaration())
     return PreservedAnalyses::all();

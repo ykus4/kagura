@@ -398,7 +398,7 @@ PreservedAnalyses FunctionSplitPass::run(Module &M,
       continue;
     if (F.hasFnAttribute(Attribute::Naked))
       continue;
-    if (!shouldObfuscate(F, "fsplit", kagura::opt::FSplit))
+    if (!shouldObfuscate(F, "fsplit"))
       continue;
     if (F.size() < 5)
       continue;
