@@ -141,15 +141,27 @@ add_subdirectory(regression)
 if(LIT_EXECUTABLE AND FILECHECK_EXECUTABLE)
   set(KAGURA_PLUGIN_PATH $<TARGET_FILE:KaguraObfuscator>)
 
+  # configure_file() expands @VAR@ but leaves $<TARGET_FILE:...> untouched, so
+  # the plugin path has to go through file(GENERATE) afterwards.  Writing the
+  # intermediate to a .in-stage name keeps the final lit.site.cfg.py the only
+  # file lit ever sees.
   configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/lit/lit.site.cfg.py.in
-    ${CMAKE_CURRENT_BINARY_DIR}/lit/lit.site.cfg.py
+    ${CMAKE_CURRENT_BINARY_DIR}/lit/lit.site.cfg.py.stage
     @ONLY
   )
+  file(GENERATE
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lit/lit.site.cfg.py
+    INPUT  ${CMAKE_CURRENT_BINARY_DIR}/lit/lit.site.cfg.py.stage
+  )
 
+  # lit is pointed at the BUILD directory, which is where lit.site.cfg.py is
+  # generated.  The site config sets test_source_root, so lit then walks the
+  # source tree for the .ll files while keeping %t and Output/ under the build
+  # tree.  Pointing lit at the source dir instead makes it load lit.cfg.py
+  # without the generated substitutions and abort.
   add_test(NAME lit-filecheck
-    COMMAND ${LIT_EXECUTABLE} -v ${CMAKE_CURRENT_SOURCE_DIR}/lit/
-      --param kagura_plugin=${KAGURA_PLUGIN_PATH}
+    COMMAND ${LIT_EXECUTABLE} -sv ${CMAKE_CURRENT_BINARY_DIR}/lit
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
   set_tests_properties(lit-filecheck PROPERTIES
@@ -157,4 +169,5 @@ if(LIT_EXECUTABLE AND FILECHECK_EXECUTABLE)
   )
 else()
   message(STATUS "lit or FileCheck not found — skipping FileCheck tests")
+  message(STATUS "  Install with: pip install lit   (FileCheck ships with LLVM)")
 endif()
