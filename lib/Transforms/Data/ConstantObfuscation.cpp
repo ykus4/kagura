@@ -16,6 +16,13 @@
 // Each constant is replaced with a randomly chosen identity.
 // Only replaces constants in user functions, not in kagura's own helpers.
 //
+// NOTE: every identity below is built from an operand that is itself a
+// constant, so the builder MUST NOT constant-fold.  The default IRBuilder<>
+// uses ConstantFolder, which evaluates e.g. (V ^ R) ^ R straight back to V and
+// hands the original ConstantInt back — setOperand() then stores the value that
+// was already there and the pass silently becomes a no-op.  IRBuilder<NoFolder>
+// emits the instructions verbatim, which is the whole point of the pass.
+//
 //===----------------------------------------------------------------------===//
 
 #include "kagura/Passes.h"
@@ -25,6 +32,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/NoFolder.h"
 
 using namespace llvm;
 
@@ -56,7 +64,7 @@ static bool obfuscateConstant(Instruction *I, unsigned OpIdx,
   if (Val == 0 || Val == ((Bits == 64) ? ~0ULL : (1ULL << Bits) - 1))
     return false;
 
-  IRBuilder<> B(I);
+  IRBuilder<NoFolder> B(I);
   Type *Ty = CI->getType();
 
   // Pick a random identity transformation
@@ -130,7 +138,7 @@ static bool obfuscateFPConstant(Instruction *I, unsigned OpIdx,
 
   uint64_t R = RNG.next() & ((Bits == 64) ? ~0ULL : 0xFFFFFFFFULL);
 
-  IRBuilder<> B(I);
+  IRBuilder<NoFolder> B(I);
   // Build: bitcast_fp( bitcast_int(FP_constant) ^ R ^ R )
   // The two XORs cancel — but the pattern is non-trivial for static analysis.
   auto *FBitsConst = ConstantInt::get(ITy, FBits);
