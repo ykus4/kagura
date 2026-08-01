@@ -117,6 +117,44 @@ kagura_add_pass_test(test_function_split
   "kagura-fsplit"
   combined_test.c)
 
+# ── Link smoke tests ───────────────────────────────────────────────────────────
+#
+# Every test above stops at the IR level, so a pass that emits a call to a
+# runtime function the runtime does not define still passes them.  Three
+# passes shipped in exactly that state.  These tests link a real executable.
+#
+# The pass list is read out of PassRegistry.def rather than written here, so a
+# newly registered pass is covered the moment its row is added.
+
+set(KAGURA_LINK_SUBJECTS
+  ${CMAKE_CURRENT_SOURCE_DIR}/pass-inputs/combined_test.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/pass-inputs/string_test.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/pass-inputs/control_flow_test.c
+)
+
+file(STRINGS ${PROJECT_SOURCE_DIR}/lib/Transforms/PassRegistry.def
+     KAGURA_PASS_ROWS
+     REGEX "^KAGURA_(FN|MOD)_PASS\\(")
+
+foreach(_row IN LISTS KAGURA_PASS_ROWS)
+  if(_row MATCHES "\"(kagura-[a-z0-9-]+)\"")
+    set(_cli ${CMAKE_MATCH_1})
+    add_test(NAME link_${_cli}
+      COMMAND ${CMAKE_COMMAND}
+        -DCLANG=${LLVM_BIN}/clang
+        -DPLUGIN=${KAGURA_PLUGIN}
+        -DRUNTIME=$<TARGET_FILE:kagura_runtime>
+        -DFLAG=${_cli}
+        "-DSOURCES=${KAGURA_LINK_SUBJECTS}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/run_link_test.cmake
+    )
+    set_tests_properties(link_${_cli} PROPERTIES LABELS link)
+  endif()
+endforeach()
+
+list(LENGTH KAGURA_PASS_ROWS _n_passes)
+message(STATUS "[kagura] Registered ${_n_passes} link smoke tests from PassRegistry.def")
+
 # ── FileCheck / lit tests ──────────────────────────────────────────────────────
 
 find_program(LIT_EXECUTABLE NAMES lit llvm-lit
