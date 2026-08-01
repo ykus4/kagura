@@ -14,29 +14,52 @@
 //           }
 //       }
 //   }
+//
+// The pass set for each profile is NOT defined here. It is read from
+// integration/profiles/<profile>.json — the single source of truth shared by
+// every kagura integration — so this file cannot drift from the Xcode, CMake,
+// Unity, Unreal or Bazel integrations.
+
+import groovy.json.JsonSlurper
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
 ext.kagura = ext.kagura ?: [:]
 
+def kaguraRoot = kagura.root ?: "${rootDir}/../kagura"
+
 def kaguraCfg = [
-    // Absolute path to KaguraObfuscator.dylib/.so
+    // Root of the kagura checkout; everything else is derived from it.
+    root           : kaguraRoot,
+
+    // Absolute path to KaguraObfuscator.{dylib,so,dll}.
+    // Leave null to probe <root>/build/lib/Transforms.
     // Override via local.properties: kagura.pluginPath=...
-    pluginPath     : kagura.pluginPath     ?: "${rootDir}/../kagura/build/lib/Transforms/KaguraObfuscator.dylib",
+    pluginPath     : kagura.pluginPath     ?: null,
 
-    enableStr      : kagura.enableStr      ?: true,   // string encryption
-    enableFla      : kagura.enableFla      ?: true,   // CFG flattening
-    enableBcf      : kagura.enableBcf      ?: true,   // bogus control flow
-    enableSub      : kagura.enableSub      ?: true,   // instruction substitution
-    enableCo       : kagura.enableCo       ?: false,  // constant obfuscation
-    enableJni      : kagura.enableJni      ?: true,   // JNI dynamic registration
-    enableAntiDebug: kagura.enableAntiDebug?: true,   // anti-debug/Frida
+    // fast | balanced | strong | off, or a path to your own JSON policy file.
+    profile        : kagura.profile        ?: "balanced",
 
-    bcfProb        : kagura.bcfProb        ?: 30,     // bogus CF probability [0-100]
-    bcfIter        : kagura.bcfIter        ?: 1,      // bogus CF iterations
-    subIter        : kagura.subIter        ?: 1,      // substitution iterations
-    seed           : kagura.seed           ?: 0,      // PRNG seed (0 = entropy)
-    metrics        : kagura.metrics        ?: false,  // print metrics to logcat
+    // ---- Per-pass overrides -------------------------------------------------
+    // null == "let the profile decide". Setting one to true/false switches to
+    // the explicit-flag path: the profile is still expanded, the override is
+    // appended after it, and -kagura-config is dropped so the kagura-config
+    // pass cannot clobber the override.
+    enableStr      : kagura.enableStr,       // string encryption
+    enableFla      : kagura.enableFla,       // CFG flattening
+    enableBcf      : kagura.enableBcf,       // bogus control flow
+    enableSub      : kagura.enableSub,       // instruction substitution
+    enableCo       : kagura.enableCo,        // constant obfuscation
+    enableAntiDebug: kagura.enableAntiDebug, // anti-debug/Frida
+
+    // Android-only; part of no shared profile, so always an override.
+    enableJni      : kagura.enableJni      != null ? kagura.enableJni : true,
+    metrics        : kagura.metrics        ?: false,
+
+    bcfProb        : kagura.bcfProb,         // bogus CF probability [0-100]
+    bcfIter        : kagura.bcfIter,         // bogus CF iterations
+    subIter        : kagura.subIter,         // substitution iterations
+    seed           : kagura.seed,            // PRNG seed (0 = entropy)
 ]
 
 // ── Load overrides from local.properties ───────────────────────────────────────
@@ -45,58 +68,120 @@ def localProps = new Properties()
 def localPropsFile = rootProject.file("local.properties")
 if (localPropsFile.exists()) {
     localPropsFile.withReader('UTF-8') { localProps.load(it) }
+    if (localProps["kagura.root"])       kaguraCfg.root       = localProps["kagura.root"]
     if (localProps["kagura.pluginPath"]) kaguraCfg.pluginPath = localProps["kagura.pluginPath"]
+    if (localProps["kagura.profile"])    kaguraCfg.profile    = localProps["kagura.profile"]
+}
+
+// ── Plugin discovery (.dylib / .so / .dll) ─────────────────────────────────────
+// The plugin is loaded by the *host* clang the NDK ships, so the host's
+// library extension is what matters — not the Android target.
+
+def findKaguraPlugin(cfg) {
+    if (cfg.pluginPath && new File(cfg.pluginPath as String).exists()) {
+        return cfg.pluginPath as String
+    }
+    def dir = new File("${cfg.root}/build/lib/Transforms")
+    for (ext in ["dylib", "so", "dll"]) {
+        def f = new File(dir, "KaguraObfuscator.${ext}")
+        if (f.exists()) return f.absolutePath
+    }
+    return null
+}
+
+// ── Profile resolution + expansion ─────────────────────────────────────────────
+
+def resolveKaguraProfile(cfg) {
+    def name = (cfg.profile as String)
+    if (name.toLowerCase() == "off") return null
+    if (["fast", "balanced", "strong"].contains(name.toLowerCase())) {
+        return new File("${cfg.root}/integration/profiles/${name.toLowerCase()}.json")
+    }
+    return new File(name)
+}
+
+// JSON key -> CLI flag is a plain underscore-to-dash rewrite
+// (str_aes -> -kagura-str-aes, anti_debug -> -kagura-anti-debug, ...).
+def expandKaguraProfile(File json) {
+    if (json == null || !json.exists()) return []
+    def doc = new JsonSlurper().parse(json)
+    def out = []
+    (doc.passes ?: [:]).each { k, v -> if (v == true) out += "-kagura-${k.replace('_', '-')}".toString() }
+    (doc.tuning ?: [:]).each { k, v -> out += "-kagura-${k.replace('_', '-')}=${v}".toString() }
+    return out
 }
 
 // ── Build the flag list ────────────────────────────────────────────────────────
 
 def buildKaguraFlags(cfg) {
-    def plugin = cfg.pluginPath as String
-    if (!new File(plugin).exists()) {
-        println "[kagura] WARNING: plugin not found at $plugin — obfuscation disabled"
+    def plugin = findKaguraPlugin(cfg)
+    if (plugin == null) {
+        println "[kagura] WARNING: plugin not found under ${cfg.root}/build/lib/Transforms " +
+                "(looked for KaguraObfuscator.{dylib,so,dll}) — obfuscation disabled"
         return []
     }
+    cfg.pluginPath = plugin
 
-    def flags = ["-fpass-plugin=$plugin"]
+    def profileFile = resolveKaguraProfile(cfg)
+    if (profileFile != null && !profileFile.exists()) {
+        println "[kagura] WARNING: profile '${cfg.profile}' not found at ${profileFile} — ignoring"
+        profileFile = null
+    }
 
+    // Explicit overrides.
+    def overrides = []
+    def addIf = { Boolean enabled, String flag -> if (enabled != null && enabled) overrides += flag }
+    addIf(cfg.enableStr,       "-kagura-str")
+    addIf(cfg.enableFla,       "-kagura-fla")
+    addIf(cfg.enableBcf,       "-kagura-bcf")
+    addIf(cfg.enableSub,       "-kagura-sub")
+    addIf(cfg.enableCo,        "-kagura-co")
+    addIf(cfg.enableAntiDebug, "-kagura-anti-debug")
+    addIf(cfg.enableJni,       "-kagura-jni")
+    addIf(cfg.metrics,         "-kagura-metrics")
+    if (cfg.bcfProb != null) overrides += "-kagura-bcf-prob=${cfg.bcfProb}".toString()
+    if (cfg.bcfIter != null) overrides += "-kagura-bcf-iter=${cfg.bcfIter}".toString()
+    if (cfg.subIter != null) overrides += "-kagura-sub-iter=${cfg.subIter}".toString()
+    if (cfg.seed    != null) overrides += "-kagura-seed=${cfg.seed}".toString()
+
+    def flags = ["-fpass-plugin=${plugin}".toString()]
     def addFlag = { flag -> flags += ["-mllvm", flag] }
 
-    if (cfg.enableStr)       addFlag("-kagura-str")
-    if (cfg.enableFla)       addFlag("-kagura-fla")
-    if (cfg.enableBcf)       addFlag("-kagura-bcf")
-    if (cfg.enableSub)       addFlag("-kagura-sub")
-    if (cfg.enableCo)        addFlag("-kagura-co")
-    if (cfg.enableJni)       addFlag("-kagura-jni")
-    if (cfg.enableAntiDebug) addFlag("-kagura-anti-debug")
-    if (cfg.metrics)         addFlag("-kagura-metrics")
-
-    if (cfg.bcfProb != 30)   addFlag("-kagura-bcf-prob=${cfg.bcfProb}")
-    if (cfg.bcfIter != 1)    addFlag("-kagura-bcf-iter=${cfg.bcfIter}")
-    if (cfg.subIter != 1)    addFlag("-kagura-sub-iter=${cfg.subIter}")
-    if (cfg.seed    != 0)    addFlag("-kagura-seed=${cfg.seed}")
+    // With no overrides, emit -kagura-config AND the flags expanded from that
+    // same JSON: identical configuration either way, so the build is correct
+    // whether or not the kagura-config pass takes effect.
+    if (profileFile != null && overrides.isEmpty()) {
+        addFlag("-kagura-config=${profileFile.absolutePath}".toString())
+    }
+    expandKaguraProfile(profileFile).each { addFlag(it) }
+    overrides.each { addFlag(it) }   // later flags win
 
     return flags
 }
 
 // ── Inject into Android NDK CMake / ndk-build ─────────────────────────────────
 
+def kaguraFlags = buildKaguraFlags(kaguraCfg)
+
 android {
     defaultConfig {
         externalNativeBuild {
             cmake {
                 // Pass kagura flags to CMake via -DKAGURA_FLAGS
-                def flags = buildKaguraFlags(kaguraCfg)
-                if (flags) {
-                    def flagsStr = flags.join(";")
+                if (kaguraFlags) {
+                    def flagsStr = kaguraFlags.join(";")
                     arguments "-DKAGURA_C_FLAGS=${flagsStr}",
                               "-DKAGURA_CXX_FLAGS=${flagsStr}"
-                    cFlags   flags.join(" ")
-                    cppFlags flags.join(" ")
+                    cFlags   kaguraFlags.join(" ")
+                    cppFlags kaguraFlags.join(" ")
                 }
             }
         }
     }
 }
 
-println "[kagura] Obfuscation enabled for Android NDK build"
-println "[kagura] Plugin: ${kaguraCfg.pluginPath}"
+if (kaguraFlags) {
+    println "[kagura] Obfuscation enabled for Android NDK build"
+    println "[kagura] Plugin : ${kaguraCfg.pluginPath}"
+    println "[kagura] Profile: ${kaguraCfg.profile}"
+}

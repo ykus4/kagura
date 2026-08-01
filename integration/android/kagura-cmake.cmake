@@ -10,91 +10,99 @@
 #
 #   include(${CMAKE_SOURCE_DIR}/../kagura/integration/android/kagura-cmake.cmake)
 #   kagura_apply_global()
+#
+# This is the lightweight entry point. For ABI-specific tuning, LLVM version
+# checking and a runtime static-library target, use kagura-android-ndk.cmake
+# instead.
+#
+# The pass set for each profile is NOT defined here — it is read from
+# integration/profiles/<profile>.json via integration/cmake/KaguraProfile.cmake,
+# the single source of truth shared by every kagura integration.
 
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.19) # string(JSON ...) in KaguraProfile.cmake
+
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/KaguraProfile.cmake")
 
 # ── Locate the plugin ──────────────────────────────────────────────────────────
+# Probes .dylib / .so / .dll and honours the KAGURA_PLUGIN_PATH CMake variable
+# and environment variable. A cross build (NDK hosted on macOS) loads the
+# *host* plugin, so the host extension is what matters here.
 
-if(NOT DEFINED KAGURA_PLUGIN_PATH)
-  # Search relative to this file's directory
-  get_filename_component(_KAGURA_INTEG_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
-  set(KAGURA_PLUGIN_PATH "${_KAGURA_INTEG_DIR}/../../build/lib/Transforms/KaguraObfuscator.dylib")
+kagura_find_plugin(_KAGURA_FOUND_PLUGIN)
+if(_KAGURA_FOUND_PLUGIN)
+  set(KAGURA_PLUGIN_PATH "${_KAGURA_FOUND_PLUGIN}"
+      CACHE FILEPATH "Path to KaguraObfuscator.{dylib,so,dll}" FORCE)
 endif()
 
-# Android: the plugin is a .so
-if(ANDROID AND NOT EXISTS "${KAGURA_PLUGIN_PATH}")
-  string(REPLACE ".dylib" ".so" KAGURA_PLUGIN_PATH "${KAGURA_PLUGIN_PATH}")
-endif()
+# ── Configuration variables (override on the cmake command line) ───────────────
 
-# ── Configuration variables (override on cmake command line) ───────────────────
-option(KAGURA_ENABLE_STR       "String encryption"              ON)
-option(KAGURA_ENABLE_FLA       "CFG flattening"                 ON)
-option(KAGURA_ENABLE_BCF       "Bogus control flow"             ON)
-option(KAGURA_ENABLE_SUB       "Instruction substitution"       ON)
-option(KAGURA_ENABLE_CO        "Constant obfuscation (MBA)"     OFF)
-option(KAGURA_ENABLE_JNI       "JNI dynamic registration"       ON)
-option(KAGURA_ENABLE_ANTIDEBUG "Anti-debug / Anti-Frida"        ON)
-option(KAGURA_METRICS          "Print obfuscation metrics"      OFF)
+set(KAGURA_PROFILE "BALANCED" CACHE STRING
+    "Obfuscation profile: FAST | BALANCED | STRONG, or a path to a JSON policy")
+set_property(CACHE KAGURA_PROFILE PROPERTY STRINGS FAST BALANCED STRONG)
 
-set(KAGURA_BCF_PROB 30 CACHE STRING "Bogus CF probability [0-100]")
-set(KAGURA_BCF_ITER  1 CACHE STRING "Bogus CF iterations")
-set(KAGURA_SUB_ITER  1 CACHE STRING "Substitution iterations")
-set(KAGURA_SEED      0 CACHE STRING "PRNG seed (0 = system entropy)")
+# Per-pass overrides. Each is a tri-state: leave it undefined to let the
+# profile decide. Setting one switches to the explicit-flag path (see below).
+option(KAGURA_ENABLE_JNI "JNI dynamic registration (Android-only; in no profile)" ON)
+option(KAGURA_METRICS    "Print obfuscation metrics"                             OFF)
+
+# KAGURA_ENABLE_STR / _FLA / _BCF / _SUB / _CO / _ANTIDEBUG and
+# KAGURA_BCF_PROB / _BCF_ITER / _SUB_ITER / _SEED are honoured if defined,
+# but are deliberately NOT given defaults here: a default would silently
+# override the profile.
 
 # ── Build flag list ────────────────────────────────────────────────────────────
 
 function(_kagura_build_flags OUT_VAR)
-  if(NOT EXISTS "${KAGURA_PLUGIN_PATH}")
-    message(WARNING "[kagura] Plugin not found at ${KAGURA_PLUGIN_PATH} — obfuscation disabled")
+  if(NOT KAGURA_PLUGIN_PATH OR NOT EXISTS "${KAGURA_PLUGIN_PATH}")
+    message(WARNING
+      "[kagura] Plugin not found — obfuscation disabled. "
+      "Set -DKAGURA_PLUGIN_PATH=/path/to/KaguraObfuscator.{dylib,so,dll}")
     set(${OUT_VAR} "" PARENT_SCOPE)
     return()
   endif()
 
-  # Build as a CMake list (semicolon-separated) for target_compile_options
-  # Build flags as a single SHELL: string so CMake passes -mllvm <flag> as pairs
-  set(_flags "SHELL:-fpass-plugin=${KAGURA_PLUGIN_PATH}")
-
-  macro(add_mllvm_flag flag)
-    list(APPEND _flags "SHELL:-mllvm ${flag}")
-  endmacro()
-
-  if(KAGURA_ENABLE_STR)
-    add_mllvm_flag(-kagura-str)
-  endif()
-  if(KAGURA_ENABLE_FLA)
-    add_mllvm_flag(-kagura-fla)
-  endif()
-  if(KAGURA_ENABLE_BCF)
-    add_mllvm_flag(-kagura-bcf)
-  endif()
-  if(KAGURA_ENABLE_SUB)
-    add_mllvm_flag(-kagura-sub)
-  endif()
-  if(KAGURA_ENABLE_CO)
-    add_mllvm_flag(-kagura-co)
-  endif()
+  # Collect explicit overrides.
+  set(_overrides "")
   if(KAGURA_ENABLE_JNI)
-    add_mllvm_flag(-kagura-jni)
-  endif()
-  if(KAGURA_ENABLE_ANTIDEBUG)
-    add_mllvm_flag(-kagura-anti-debug)
+    list(APPEND _overrides "-kagura-jni")
   endif()
   if(KAGURA_METRICS)
-    add_mllvm_flag(-kagura-metrics)
+    list(APPEND _overrides "-kagura-metrics")
   endif()
+  foreach(_pair
+      "KAGURA_ENABLE_STR;-kagura-str"
+      "KAGURA_ENABLE_FLA;-kagura-fla"
+      "KAGURA_ENABLE_BCF;-kagura-bcf"
+      "KAGURA_ENABLE_SUB;-kagura-sub"
+      "KAGURA_ENABLE_CO;-kagura-co"
+      "KAGURA_ENABLE_ANTIDEBUG;-kagura-anti-debug")
+    list(GET _pair 0 _var)
+    list(GET _pair 1 _flag)
+    if(DEFINED ${_var})
+      if(${_var})
+        list(APPEND _overrides "${_flag}")
+      endif()
+    endif()
+  endforeach()
+  foreach(_pair
+      "KAGURA_BCF_PROB;-kagura-bcf-prob"
+      "KAGURA_BCF_ITER;-kagura-bcf-iter"
+      "KAGURA_SUB_ITER;-kagura-sub-iter"
+      "KAGURA_SEED;-kagura-seed")
+    list(GET _pair 0 _var)
+    list(GET _pair 1 _flag)
+    if(DEFINED ${_var})
+      list(APPEND _overrides "${_flag}=${${_var}}")
+    endif()
+  endforeach()
 
-  if(NOT KAGURA_BCF_PROB EQUAL 30)
-    add_mllvm_flag("-kagura-bcf-prob=${KAGURA_BCF_PROB}")
-  endif()
-  if(NOT KAGURA_BCF_ITER EQUAL 1)
-    add_mllvm_flag("-kagura-bcf-iter=${KAGURA_BCF_ITER}")
-  endif()
-  if(NOT KAGURA_SUB_ITER EQUAL 1)
-    add_mllvm_flag("-kagura-sub-iter=${KAGURA_SUB_ITER}")
-  endif()
-  if(NOT KAGURA_SEED EQUAL 0)
-    add_mllvm_flag("-kagura-seed=${KAGURA_SEED}")
-  endif()
+  kagura_profile_flags("${KAGURA_PROFILE}" _pass_flags OVERRIDES ${_overrides})
+
+  # Build flags as SHELL: strings so CMake passes "-mllvm <flag>" as a pair.
+  set(_flags "SHELL:-fpass-plugin=${KAGURA_PLUGIN_PATH}")
+  foreach(_flag IN LISTS _pass_flags)
+    list(APPEND _flags "SHELL:-mllvm ${_flag}")
+  endforeach()
 
   set(${OUT_VAR} "${_flags}" PARENT_SCOPE)
 endfunction()

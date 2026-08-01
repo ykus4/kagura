@@ -59,13 +59,18 @@ add_library(mynativelib SHARED src/native.cpp)
 kagura_android_target(mynativelib)
 ```
 
-To also compile the kagura runtime (anti-debug, AES decrypt stubs, IL2CPP
-protection) into your build, add one line before `kagura_android_target`:
+To also compile the kagura runtime (anti-debug, AES decrypt stubs, Android
+integrity checks) into your build, add one line before `kagura_android_target`:
 
 ```cmake
 kagura_android_runtime_target(kagura_runtime)
 kagura_android_target(mynativelib)   # auto-links kagura_runtime
 ```
+
+The runtime target globs `runtime/core/`, `runtime/anti_debug/` and
+`runtime/android/` by directory (plus `runtime/game/` when
+`KAGURA_ENABLE_IL2CPP=ON`), so files moving inside `runtime/` do not break it.
+`runtime/ios/` and `runtime/windows/` are excluded.
 
 ---
 
@@ -73,53 +78,58 @@ kagura_android_target(mynativelib)   # auto-links kagura_runtime
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `KAGURA_PLUGIN_PATH` | PATH | auto | Absolute path to `KaguraObfuscator.so` |
-| `KAGURA_PROFILE` | STRING | `BALANCED` | Preset profile (see below) |
-| `KAGURA_RUNTIME_DIR` | PATH | auto | Directory with runtime `.c` sources |
-| `KAGURA_ENABLE_STR` | BOOL | ON | Narrow string encryption |
-| `KAGURA_ENABLE_STR_AES` | BOOL | OFF | AES-128-CTR string encryption |
-| `KAGURA_ENABLE_WSTR` | BOOL | ON | Wide string encryption |
-| `KAGURA_ENABLE_FLA` | BOOL | ON | CFG flattening |
-| `KAGURA_ENABLE_BCF` | BOOL | OFF | Bogus control flow |
-| `KAGURA_ENABLE_SUB` | BOOL | OFF | Instruction substitution |
-| `KAGURA_ENABLE_CO` | BOOL | OFF | Constant obfuscation (MBA) |
-| `KAGURA_ENABLE_GENC` | BOOL | OFF | Global integer encryption |
-| `KAGURA_ENABLE_MVO` | BOOL | OFF | Memory value obfuscation (local integer XOR) |
-| `KAGURA_ENABLE_JNI` | BOOL | ON | JNI dynamic registration |
-| `KAGURA_ENABLE_ANTIDEBUG` | BOOL | ON | Anti-debug / Anti-Frida |
-| `KAGURA_ENABLE_TAMPER` | BOOL | ON | Anti-tamper integrity checks |
-| `KAGURA_ENABLE_HONEY` | BOOL | OFF | Honey value / fake symbol injection |
-| `KAGURA_ENABLE_IL2CPP` | BOOL | OFF | IL2CPP runtime protection |
-| `KAGURA_BCF_PROB` | STRING | 30 | Bogus CF probability 0–100 |
-| `KAGURA_BCF_ITER` | STRING | 1 | Bogus CF iterations |
-| `KAGURA_SUB_ITER` | STRING | 1 | Instruction substitution iterations |
-| `KAGURA_SEED` | STRING | 0 | PRNG seed (0 = system entropy) |
+| `KAGURA_PLUGIN_PATH` | FILEPATH | auto | Absolute path to `KaguraObfuscator.{dylib,so,dll}`. Auto-discovered under `<kagura>/build/lib/Transforms`; may also come from the environment variable of the same name. All three extensions are probed, because the plugin runs in the *host* clang |
+| `KAGURA_PROFILE` | STRING | `BALANCED` | `FAST` / `BALANCED` / `STRONG` / `CUSTOM`, or a path to your own JSON policy file |
+| `KAGURA_RUNTIME_DIR` | PATH | auto | The kagura `runtime/` directory |
+| `KAGURA_ENABLE_JNI` | BOOL | ON | JNI dynamic registration (Android-only; in no shared profile) |
+| `KAGURA_ENABLE_IL2CPP` | BOOL | OFF | Also compile `runtime/game/` into `kagura_runtime` |
 | `KAGURA_METRICS` | BOOL | OFF | Print obfuscation metrics to stdout |
-| `KAGURA_SYMMAP` | BOOL | OFF | Emit JSON symbol map |
 
-Fine-grained toggles are only applied when `KAGURA_PROFILE=CUSTOM`.  All other
-profiles override the individual flags.
+### Per-pass overrides
+
+These have **no default** on purpose — leaving one undefined means "the
+profile decides". Define one on the CMake command line and it is applied after
+the profile (later flag wins), and `-kagura-config` is dropped so the
+`kagura-config` pass cannot clobber it.
+
+| Variable | Description |
+|---|---|
+| `KAGURA_ENABLE_STR` | String encryption |
+| `KAGURA_ENABLE_FLA` | CFG flattening |
+| `KAGURA_ENABLE_BCF` | Bogus control flow |
+| `KAGURA_ENABLE_SUB` | Instruction substitution |
+| `KAGURA_ENABLE_CO` | Constant obfuscation (MBA) |
+| `KAGURA_ENABLE_ANTIDEBUG` | Anti-debug / Anti-Frida |
+| `KAGURA_BCF_PROB` | Bogus CF probability 0–100 |
+| `KAGURA_BCF_ITER` | Bogus CF iterations |
+| `KAGURA_SUB_ITER` | Instruction substitution iterations |
+| `KAGURA_SEED` | PRNG seed (0 = system entropy) |
 
 ---
 
 ## Profile Presets
 
-| Profile | Passes enabled | BCF prob | Intended use |
-|---|---|---|---|
-| `FAST` | str, jni, anti-debug | — | Hot paths, CI builds, debug variants |
-| `BALANCED` | str, wstr, bcf, bbr, bbs, genc, mvo, jni, anti-debug, tamper | 30 | Release builds (default) |
-| `STRONG` | all passes + il2cpp | 60, 2 iter | Security-critical shipping builds |
-| `CUSTOM` | whatever `KAGURA_ENABLE_*` says | user-defined | Fine-grained control |
+The pass set for each profile is **not** defined in this integration. It is
+read at configure time from the shared policy files in
+[`integration/profiles`](../profiles/README.md), which is what keeps the
+Android, Xcode, CMake, Unity, Unreal and Bazel integrations from drifting
+apart:
 
-Profiles can also be set via the JSON config DSL:
+| Profile | Definition | Intended use |
+|---|---|---|
+| `FAST` | `integration/profiles/fast.json` | Hot paths, CI builds, debug variants |
+| `BALANCED` | `integration/profiles/balanced.json` | Release builds (default) |
+| `STRONG` | `integration/profiles/strong.json` | Security-critical shipping builds |
+| `CUSTOM` | none — only `KAGURA_ENABLE_*` | Fine-grained control |
+| *path* | your own JSON policy file | See [Configuration](https://ykus4.github.io/kagura/configuration/) |
 
 ```cmake
-set(KAGURA_CONFIG_PATH "${CMAKE_SOURCE_DIR}/kagura.json")
+set(KAGURA_PROFILE "${CMAKE_SOURCE_DIR}/kagura.json")
 kagura_android_config()
 ```
 
 ```json
-{ "profile": "STRONG" }
+{ "profile": "STRONG", "passes": { "vm": true } }
 ```
 
 ---
@@ -138,17 +148,22 @@ Override individual settings before the `apply from` line:
 
 ```groovy
 ext.kagura = [
-    pluginPath : "/opt/kagura/build/lib/Transforms/KaguraObfuscator.so",
-    enableBcf  : true,
+    root       : "/opt/kagura",          // plugin + profiles are found from here
+    profile    : "strong",               // fast | balanced | strong | off | <path.json>
+    enableBcf  : true,                   // override just this pass
     bcfProb    : 40,
-    enableCo   : false,
 ]
 apply from: "${rootDir}/../kagura/integration/android/kagura.gradle"
 ```
 
+Every `enable*` / tuning key defaults to `null`, meaning "use the profile".
+Setting one switches to the explicit-flag path.
+
 Settings can also be placed in `local.properties` (not committed to VCS):
 
 ```properties
+kagura.root=/Users/me/kagura
+kagura.profile=balanced
 kagura.pluginPath=/Users/me/kagura/build/lib/Transforms/KaguraObfuscator.so
 ```
 

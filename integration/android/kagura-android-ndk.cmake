@@ -38,28 +38,38 @@
 # build.gradle's arguments block)
 # ─────────────────────────────────────────────────────────────────────────────
 #
-#   KAGURA_PLUGIN_PATH   Path to KaguraObfuscator.so/.dylib (required)
-#   KAGURA_PROFILE       Obfuscation profile: FAST | BALANCED | STRONG | CUSTOM
+#   KAGURA_PLUGIN_PATH   Path to KaguraObfuscator.{dylib,so,dll}
+#                        (auto-discovered under <kagura>/build/lib/Transforms,
+#                         or taken from the environment variable of the same name)
+#   KAGURA_PROFILE       Obfuscation profile: FAST | BALANCED | STRONG | CUSTOM,
+#                        or a path to your own JSON policy file
 #                        (default: BALANCED)
-#   KAGURA_RUNTIME_DIR   Directory containing il2cpp_protection.c and other
-#                        runtime sources (default: auto-detected)
+#   KAGURA_RUNTIME_DIR   The kagura runtime/ directory (default: auto-detected)
 #
-#   Fine-grained pass toggles (only respected when KAGURA_PROFILE=CUSTOM):
-#     KAGURA_ENABLE_STR        String encryption           (default ON)
-#     KAGURA_ENABLE_FLA        CFG flattening              (default ON)
-#     KAGURA_ENABLE_BCF        Bogus control flow          (default OFF)
-#     KAGURA_ENABLE_SUB        Instruction substitution    (default OFF)
-#     KAGURA_ENABLE_CO         Constant obfuscation (MBA)  (default OFF)
+#   Fine-grained pass toggles. Each one that is set is applied AFTER the
+#   profile and overrides it; -kagura-config is then omitted so the
+#   kagura-config pass cannot clobber the override:
+#     KAGURA_ENABLE_STR        String encryption
+#     KAGURA_ENABLE_FLA        CFG flattening
+#     KAGURA_ENABLE_BCF        Bogus control flow
+#     KAGURA_ENABLE_SUB        Instruction substitution
+#     KAGURA_ENABLE_CO         Constant obfuscation (MBA)
 #     KAGURA_ENABLE_JNI        JNI dynamic registration    (default ON)
-#     KAGURA_ENABLE_ANTIDEBUG  Anti-debug / Anti-Frida     (default ON)
+#     KAGURA_ENABLE_ANTIDEBUG  Anti-debug / Anti-Frida
 #     KAGURA_ENABLE_IL2CPP     IL2CPP runtime protection   (default OFF)
-#     KAGURA_BCF_PROB          Bogus CF probability [0-100] (default 30)
-#     KAGURA_BCF_ITER          Bogus CF iterations          (default 1)
-#     KAGURA_SUB_ITER          Substitution iterations      (default 1)
-#     KAGURA_SEED              PRNG seed (0 = system entropy)(default 0)
+#     KAGURA_BCF_PROB          Bogus CF probability [0-100]
+#     KAGURA_BCF_ITER          Bogus CF iterations
+#     KAGURA_SUB_ITER          Substitution iterations
+#     KAGURA_SEED              PRNG seed (0 = system entropy)
 #     KAGURA_METRICS           Emit obfuscation metrics      (default OFF)
+#
+# The pass set for each profile is NOT defined in this file. It is read from
+# integration/profiles/<profile>.json via integration/cmake/KaguraProfile.cmake,
+# the single source of truth shared by every kagura integration.
 
 cmake_minimum_required(VERSION 3.22)
+
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/KaguraProfile.cmake")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal: resolve this file's directory so helper paths work regardless
@@ -77,37 +87,29 @@ if(NOT DEFINED KAGURA_RUNTIME_DIR)
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Profile definitions
+# Profile selection
 # ─────────────────────────────────────────────────────────────────────────────
-
-# FAST    : low overhead — FLA + SUB only
-# BALANCED: medium overhead — FAST + BCF + STR  (default)
-# STRONG  : maximum protection — all passes enabled, BCF probability 50
-# CUSTOM  : honour individual KAGURA_ENABLE_* variables as-is
+#
+# FAST / BALANCED / STRONG resolve to integration/profiles/<name>.json.
+# CUSTOM means "no profile — use the KAGURA_ENABLE_* variables only".
+# Any other value is treated as a path to your own JSON policy file.
 
 set(KAGURA_PROFILE "BALANCED" CACHE STRING
-    "Obfuscation profile: FAST | BALANCED | STRONG | CUSTOM")
+    "Obfuscation profile: FAST | BALANCED | STRONG | CUSTOM | <path to .json>")
 set_property(CACHE KAGURA_PROFILE PROPERTY STRINGS FAST BALANCED STRONG CUSTOM)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Fine-grained pass options (defaults; profiles override these in
-# kagura_android_config())
+# Fine-grained pass options
+#
+# Only KAGURA_ENABLE_JNI, KAGURA_ENABLE_IL2CPP and KAGURA_METRICS get defaults:
+# they are Android-specific and appear in no shared profile. The rest are
+# intentionally left undefined so the profile decides; define one on the
+# command line to override the profile for that pass.
 # ─────────────────────────────────────────────────────────────────────────────
 
-option(KAGURA_ENABLE_STR       "String encryption"              ON)
-option(KAGURA_ENABLE_FLA       "CFG flattening"                 ON)
-option(KAGURA_ENABLE_BCF       "Bogus control flow"             OFF)
-option(KAGURA_ENABLE_SUB       "Instruction substitution"       OFF)
-option(KAGURA_ENABLE_CO        "Constant obfuscation (MBA)"     OFF)
 option(KAGURA_ENABLE_JNI       "JNI dynamic registration"       ON)
-option(KAGURA_ENABLE_ANTIDEBUG "Anti-debug / Anti-Frida"        ON)
 option(KAGURA_ENABLE_IL2CPP    "IL2CPP runtime protection"      OFF)
 option(KAGURA_METRICS          "Print obfuscation metrics"      OFF)
-
-set(KAGURA_BCF_PROB 30  CACHE STRING "Bogus CF probability [0-100]")
-set(KAGURA_BCF_ITER  1  CACHE STRING "Bogus CF iterations")
-set(KAGURA_SUB_ITER  1  CACHE STRING "Substitution iterations")
-set(KAGURA_SEED      0  CACHE STRING "PRNG seed (0 = system entropy)")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal: build the compile-options list from the current flag variables.
@@ -115,56 +117,61 @@ set(KAGURA_SEED      0  CACHE STRING "PRNG seed (0 = system entropy)")
 # ─────────────────────────────────────────────────────────────────────────────
 
 function(_kagura_ndk_build_flags OUT_VAR)
-  if(NOT EXISTS "${KAGURA_PLUGIN_PATH}")
+  if(NOT KAGURA_PLUGIN_PATH OR NOT EXISTS "${KAGURA_PLUGIN_PATH}")
     message(WARNING
       "[kagura] Plugin not found at ${KAGURA_PLUGIN_PATH} — obfuscation disabled")
     set(${OUT_VAR} "" PARENT_SCOPE)
     return()
   endif()
 
-  set(_flags "SHELL:-fpass-plugin=${KAGURA_PLUGIN_PATH}")
-
-  macro(_add_mllvm _flag)
-    list(APPEND _flags "SHELL:-mllvm ${_flag}")
-  endmacro()
-
-  if(KAGURA_ENABLE_STR)
-    _add_mllvm(-kagura-str)
-  endif()
-  if(KAGURA_ENABLE_FLA)
-    _add_mllvm(-kagura-fla)
-  endif()
-  if(KAGURA_ENABLE_BCF)
-    _add_mllvm(-kagura-bcf)
-  endif()
-  if(KAGURA_ENABLE_SUB)
-    _add_mllvm(-kagura-sub)
-  endif()
-  if(KAGURA_ENABLE_CO)
-    _add_mllvm(-kagura-co)
-  endif()
+  # Explicit overrides. Android-only passes are never part of a shared
+  # profile, so they always come through here.
+  set(_overrides "")
   if(KAGURA_ENABLE_JNI)
-    _add_mllvm(-kagura-jni)
-  endif()
-  if(KAGURA_ENABLE_ANTIDEBUG)
-    _add_mllvm(-kagura-anti-debug)
+    list(APPEND _overrides "-kagura-jni")
   endif()
   if(KAGURA_METRICS)
-    _add_mllvm(-kagura-metrics)
+    list(APPEND _overrides "-kagura-metrics")
+  endif()
+  foreach(_pair
+      "KAGURA_ENABLE_STR;-kagura-str"
+      "KAGURA_ENABLE_FLA;-kagura-fla"
+      "KAGURA_ENABLE_BCF;-kagura-bcf"
+      "KAGURA_ENABLE_SUB;-kagura-sub"
+      "KAGURA_ENABLE_CO;-kagura-co"
+      "KAGURA_ENABLE_ANTIDEBUG;-kagura-anti-debug")
+    list(GET _pair 0 _var)
+    list(GET _pair 1 _flag)
+    if(DEFINED ${_var})
+      if(${_var})
+        list(APPEND _overrides "${_flag}")
+      endif()
+    endif()
+  endforeach()
+  foreach(_pair
+      "KAGURA_BCF_PROB;-kagura-bcf-prob"
+      "KAGURA_BCF_ITER;-kagura-bcf-iter"
+      "KAGURA_SUB_ITER;-kagura-sub-iter"
+      "KAGURA_SEED;-kagura-seed")
+    list(GET _pair 0 _var)
+    list(GET _pair 1 _flag)
+    if(DEFINED ${_var})
+      list(APPEND _overrides "${_flag}=${${_var}}")
+    endif()
+  endforeach()
+
+  # CUSTOM = no profile; the overrides are the whole configuration.
+  set(_profile "${KAGURA_PROFILE}")
+  if(_profile STREQUAL "CUSTOM")
+    set(_profile "")
   endif()
 
-  if(NOT KAGURA_BCF_PROB EQUAL 30)
-    _add_mllvm("-kagura-bcf-prob=${KAGURA_BCF_PROB}")
-  endif()
-  if(NOT KAGURA_BCF_ITER EQUAL 1)
-    _add_mllvm("-kagura-bcf-iter=${KAGURA_BCF_ITER}")
-  endif()
-  if(NOT KAGURA_SUB_ITER EQUAL 1)
-    _add_mllvm("-kagura-sub-iter=${KAGURA_SUB_ITER}")
-  endif()
-  if(NOT KAGURA_SEED EQUAL 0)
-    _add_mllvm("-kagura-seed=${KAGURA_SEED}")
-  endif()
+  kagura_profile_flags("${_profile}" _pass_flags OVERRIDES ${_overrides})
+
+  set(_flags "SHELL:-fpass-plugin=${KAGURA_PLUGIN_PATH}")
+  foreach(_flag IN LISTS _pass_flags)
+    list(APPEND _flags "SHELL:-mllvm ${_flag}")
+  endforeach()
 
   set(${OUT_VAR} "${_flags}" PARENT_SCOPE)
 endfunction()
@@ -243,27 +250,19 @@ endfunction()
 
 function(kagura_android_config)
   # ---- Plugin path validation ----
-  if(NOT DEFINED KAGURA_PLUGIN_PATH)
-    # Fall back to a path relative to this file's location.
-    if(ANDROID)
-      set(KAGURA_PLUGIN_PATH
-          "${_KAGURA_NDK_DIR}/../../build/lib/Transforms/KaguraObfuscator.so"
-          CACHE PATH "Path to KaguraObfuscator plugin" FORCE)
-    else()
-      set(KAGURA_PLUGIN_PATH
-          "${_KAGURA_NDK_DIR}/../../build/lib/Transforms/KaguraObfuscator.dylib"
-          CACHE PATH "Path to KaguraObfuscator plugin" FORCE)
-    endif()
-  endif()
-
-  get_filename_component(_kp "${KAGURA_PLUGIN_PATH}" ABSOLUTE)
-  if(NOT EXISTS "${_kp}")
-    message(WARNING
-      "[kagura] Plugin not found: ${_kp}\n"
-      "  Build the plugin first:  cmake --build <kagura-build-dir>\n"
-      "  Then set -DKAGURA_PLUGIN_PATH=<path>")
-  else()
+  # The plugin runs inside the *host* clang, so the host extension is what
+  # matters: .dylib on macOS, .so on Linux, .dll on Windows. Probe all three
+  # rather than branching on the Android target.
+  kagura_find_plugin(_kp HINTS "${_KAGURA_NDK_DIR}/../../build/lib/Transforms")
+  if(_kp)
+    set(KAGURA_PLUGIN_PATH "${_kp}"
+        CACHE FILEPATH "Path to KaguraObfuscator plugin" FORCE)
     message(STATUS "[kagura] Plugin: ${_kp}")
+  else()
+    message(WARNING
+      "[kagura] Plugin not found under ${_KAGURA_NDK_DIR}/../../build/lib/Transforms\n"
+      "  Build the plugin first:  cmake --build <kagura-build-dir>\n"
+      "  Then set -DKAGURA_PLUGIN_PATH=<path to KaguraObfuscator.{dylib,so,dll}>")
   endif()
 
   # ---- LLVM version check ----
@@ -292,57 +291,25 @@ function(kagura_android_config)
     endif()
   endif()
 
-  # ---- Apply profile presets ----
-  # Profiles set the CACHE variables so they are visible to all subsequent
-  # CMakeLists.txt files processed after this call.
+  # ---- Resolve the profile ----
+  # Nothing about which passes a profile enables lives here: the pass set is
+  # read from integration/profiles/<profile>.json at flag-build time. This
+  # only validates the selection and reports it.
 
-  if(KAGURA_PROFILE STREQUAL "FAST")
-    # Lowest overhead: FLA + SUB.  No BCF, no string encryption.
-    set(KAGURA_ENABLE_STR       OFF CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_FLA       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_BCF       OFF CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_SUB       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_CO        OFF CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_JNI       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_ANTIDEBUG ON  CACHE BOOL "" FORCE)
-    set(KAGURA_BCF_PROB         20  CACHE STRING "" FORCE)
-    message(STATUS "[kagura] Profile: FAST  (fla + sub)")
-
-  elseif(KAGURA_PROFILE STREQUAL "BALANCED")
-    # Medium overhead: FLA + BCF + STR + SUB.
-    set(KAGURA_ENABLE_STR       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_FLA       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_BCF       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_SUB       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_CO        OFF CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_JNI       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_ANTIDEBUG ON  CACHE BOOL "" FORCE)
-    set(KAGURA_BCF_PROB         30  CACHE STRING "" FORCE)
-    message(STATUS "[kagura] Profile: BALANCED  (fla + bcf + str + sub)")
-
-  elseif(KAGURA_PROFILE STREQUAL "STRONG")
-    # Maximum protection: all passes, higher BCF probability.
-    set(KAGURA_ENABLE_STR       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_FLA       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_BCF       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_SUB       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_CO        ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_JNI       ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_ANTIDEBUG ON  CACHE BOOL "" FORCE)
-    set(KAGURA_ENABLE_IL2CPP    ON  CACHE BOOL "" FORCE)
-    set(KAGURA_BCF_PROB         50  CACHE STRING "" FORCE)
-    set(KAGURA_BCF_ITER         2   CACHE STRING "" FORCE)
-    message(STATUS "[kagura] Profile: STRONG  (all passes, bcf-prob=50)")
-
-  elseif(KAGURA_PROFILE STREQUAL "CUSTOM")
+  if(KAGURA_PROFILE STREQUAL "CUSTOM")
     message(STATUS
       "[kagura] Profile: CUSTOM  (using individual KAGURA_ENABLE_* variables)")
-
   else()
-    message(WARNING
-      "[kagura] Unknown profile '${KAGURA_PROFILE}'. "
-      "Falling back to BALANCED.  Valid values: FAST BALANCED STRONG CUSTOM")
-    set(KAGURA_PROFILE "BALANCED" CACHE STRING "" FORCE)
+    kagura_profile_resolve("${KAGURA_PROFILE}" _profile_json)
+    if(_profile_json)
+      message(STATUS "[kagura] Profile: ${KAGURA_PROFILE}  (${_profile_json})")
+    else()
+      message(WARNING
+        "[kagura] Unknown profile '${KAGURA_PROFILE}'. "
+        "Falling back to BALANCED.  Valid values: FAST BALANCED STRONG CUSTOM "
+        "or a path to a JSON policy file")
+      set(KAGURA_PROFILE "BALANCED" CACHE STRING "" FORCE)
+    endif()
   endif()
 endfunction()
 
@@ -416,28 +383,42 @@ function(kagura_android_runtime_target TARGET_NAME)
   if(NOT EXISTS "${KAGURA_RUNTIME_DIR}")
     message(WARNING
       "[kagura] Runtime source directory not found: ${KAGURA_RUNTIME_DIR}\n"
-      "  Set -DKAGURA_RUNTIME_DIR=<path> to the directory containing "
-      "anti_debug.c, jailbreak_detection.c, aes.c, etc.")
+      "  Set -DKAGURA_RUNTIME_DIR=<path> to the kagura runtime/ directory "
+      "(the one containing core/, anti_debug/, android/, game/)")
     return()
   endif()
 
-  # Collect runtime sources that always compile.
-  set(_runtime_sources
-    "${KAGURA_RUNTIME_DIR}/anti_debug.c"
-    "${KAGURA_RUNTIME_DIR}/aes.c"
-    "${KAGURA_RUNTIME_DIR}/jailbreak_detection.c"
-    "${KAGURA_RUNTIME_DIR}/vm_interpreter.c"
+  # Collect runtime sources by DIRECTORY, never by file name: runtime/ is
+  # reorganised from time to time and an explicit file list here silently
+  # went stale once already (it still named the pre-reorg runtime/aes.c,
+  # runtime/anti_debug.c, runtime/jailbreak_detection.c paths).
+  #
+  # runtime/ios/ and runtime/windows/ are excluded — they are Darwin- and
+  # Win32-specific and do not build for Android.
+  file(GLOB _runtime_sources CONFIGURE_DEPENDS
+    "${KAGURA_RUNTIME_DIR}/core/*.c"
+    "${KAGURA_RUNTIME_DIR}/anti_debug/*.c"
+    "${KAGURA_RUNTIME_DIR}/android/*.c"
   )
 
-  # Optionally include the IL2CPP protection module.
+  # The anti-cheat helpers (IL2CPP, UE4, protected values) are only needed by
+  # game builds and pull in more code, so they stay opt-in.
   if(KAGURA_ENABLE_IL2CPP)
-    set(_il2cpp_src "${KAGURA_RUNTIME_DIR}/il2cpp_protection.c")
-    if(EXISTS "${_il2cpp_src}")
-      list(APPEND _runtime_sources "${_il2cpp_src}")
+    file(GLOB _game_sources CONFIGURE_DEPENDS "${KAGURA_RUNTIME_DIR}/game/*.c")
+    if(_game_sources)
+      list(APPEND _runtime_sources ${_game_sources})
     else()
       message(WARNING
-        "[kagura] KAGURA_ENABLE_IL2CPP=ON but ${_il2cpp_src} not found")
+        "[kagura] KAGURA_ENABLE_IL2CPP=ON but no sources found in "
+        "${KAGURA_RUNTIME_DIR}/game/")
     endif()
+  endif()
+
+  if(NOT _runtime_sources)
+    message(WARNING
+      "[kagura] No runtime sources found under ${KAGURA_RUNTIME_DIR} — "
+      "has the runtime layout changed?")
+    return()
   endif()
 
   add_library(${TARGET_NAME} STATIC ${_runtime_sources})
