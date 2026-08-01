@@ -21,7 +21,17 @@ Kagura は `-kagura-config=<path>` で JSON ポリシーファイルを受け取
 }
 ```
 
-ポリシーファイルはパイプライン先頭の **`kagura-config`** パスで読み込まれ、後続パスのデフォルト値を設定します。関数単位の [`__attribute__((annotate("kagura_*")))`](getting-started/quick-start.md#5) オーバーライドは関数ごとに優先されます。
+ポリシーファイルは **パイプラインの構築前** に読み込まれます。パイプライン内のパスとしてではありません。この区別は重要で、どのパスを有効にするかはパイプライン構築時に決まるため、パスとして動くローダでは常に手遅れになります — 本リリース以前に `-kagura-config` が完全に無効だった原因はまさにこれです。
+
+優先順位（高い順）:
+
+1. コマンドラインで明示指定した `-kagura-*` フラグ。`-kagura-config=p.json -kagura-str=false` は、`p.json` が要求していても文字列暗号化を無効にします。
+2. `$KAGURA_FLAVOR` に一致する `flavors` ブロック。
+3. `passes` / `tuning` オブジェクト。
+4. `profile` プリセット。
+5. 組み込みデフォルト（全パス無効）。
+
+関数単位の [`__attribute__((annotate("kagura_*")))`](getting-started/quick-start.md#5) オーバーライドは関数ごとに優先されます。
 
 ## 強度プロファイル
 
@@ -30,8 +40,10 @@ Kagura は `-kagura-config=<path>` で JSON ポリシーファイルを受け取
 | プロファイル | パス | 用途 |
 |:-------------|:-----|:-----|
 | `FAST`     | STR のみ | デバッグ / CI ビルド、最小オーバーヘッド |
-| `BALANCED` | STR + BCF + BBR + BBS + GENC + MVO | 標準リリースビルド |
-| `STRONG`   | 全パス、BCF 確率60、2 イテレーション | セキュリティクリティカルな出荷ビルド |
+| `BALANCED` | `str` `wstr` `bcf` `bbr` `bbs` `dci` `genc` `mvo`（`bcf_prob` 20, `bcf_iter` 1） | 標準リリースビルド |
+| `STRONG`   | `str` `str-aes` `wstr` `fla` `bcf` `sub` `co` `ibr` `lt` `bbr` `bbs` `dci` `genc` `mvo` `sv` `honey`（`bcf_prob` 50, `bcf_iter` 2, `sub_iter` 2） | セキュリティクリティカルな出荷ビルド |
+
+`STRONG` は「全パス」ではありません。`kagura_runtime` のリンクを必要とするもの、ABI を変えるもの、コストが大きすぎるものは意図的に除外しています: `anti-debug`, `tamper`, `ci`, `pac`, `vm`, `fsplit`, `pe`, `elt`, `vtp`, `bbcheck`, `telemetry`, `string-split`。必要な場合は `passes` オブジェクトで明示的に有効化してください。
 
 プロファイルはデフォルトを設定するだけ。`"passes"` や `"tuning"` で個別キーをオーバーライドできます。
 
