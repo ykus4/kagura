@@ -63,3 +63,8 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          # The default is 10 minutes. On 2026-08-06 two consecutive deploys of
+          # 0a11242f sat in deployment_queued for the full 600s and the action
+          # cancelled them, so main shipped nothing while the built site was fine.
+          timeout: 1800000
