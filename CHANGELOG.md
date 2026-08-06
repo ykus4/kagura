@@ -25,10 +25,27 @@ actually obfuscated before. Re-measure size and performance before shipping.
 | `-kagura-autoselect` | no-op | narrows protection per function by risk score |
 | `-kagura-lt`, `-kagura-fsplit` | crashed clang | apply their transforms |
 | `opt -passes=kagura-{bbs,bbr,dci,ibr,lt,fsplit,bbcheck,telemetry,pe,elt,mvo}` | silently inert | apply their transforms |
+| `"profile": "FAST" \| "BALANCED" \| "STRONG"` | `sv`, `anti-debug` and (BALANCED/STRONG) `tamper` were left off | enabled, matching the shipped `integration/profiles/*.json` |
 
 The `-kagura-config` change is the largest. A policy file requesting
 `"profile": "STRONG"` previously enabled **no** passes; it now enables around
 fourteen.
+
+**Profiles now require `kagura_runtime` to be linked.** All three enable
+`anti-debug`. The shipped `integration/profiles/*.json` always did; the compiled
+preset behind a bare `{"profile": "…"}` did not, and the two are now one
+definition. If you select a profile without linking the runtime you will get
+undefined symbols at link time where you previously got a silently weaker
+binary.
+
+**`integration/profiles/*.json` are generated.** Edit
+`lib/Transforms/Profiles.def` and run `scripts/ci/gen-profiles.py`. `"seed": 0`
+is no longer emitted — it was the default anyway, and it made
+`KaguraProfile.cmake` pass `-kagura-seed=0` on every profile build, which pinned
+the seed against any later `-kagura-config`.
+
+**Removed:** `KAGURA_LEGACY_PM` and the legacy pass-manager shims. They required
+LLVM ≤ 16; the project requires 17.
 
 Precedence is also now defined, where before it was undefined: an explicit
 command-line flag beats the config file, so
@@ -184,6 +201,51 @@ than having the profile preset silently overwrite it.
   `android/*.c` was compiled on macOS as an empty translation unit and every
   `ios/*.c` on Linux.
 
+#### Definitions that existed more than once
+
+Every item here was a value or list written out in two or more places, kept in
+step by a comment asking the reader to remember the others.
+
+- **The strength profiles** lived in four places — `applyProfile()`,
+  `integration/profiles/*.json`, the table in `docs/configuration.md` and the
+  prose in `integration/profiles/README.md` — and had already diverged over
+  `sv` / `anti_debug` / `tamper` (see above). One definition now, in
+  `lib/Transforms/Profiles.def`, with a CI job that fails if the generated JSON
+  is stale.
+- **The VM opcode table** was a C++ enum in `include/kagura/VM.h` and 48
+  `#define`s in `runtime/core/vm_interpreter.c`, plus four frame limits. A
+  disagreement between the emitter and the interpreter of a wire format does
+  not fail to compile and does not fail an IR-level test; it ships. Both sides
+  now expand `include/kagura/VMOpcodes.def`.
+- **The CLI flag declarations.** `Options.cpp` generated its definitions from
+  `PassRegistry.def` while `Options.h` listed the 40 matching externs by hand,
+  three of them twice. Numeric tuning parameters were worse: definition,
+  extern, and the JSON-key-to-flag mapping in `ConfigLoader.cpp` were three
+  independent copies. All generated from `KAGURA_TUNING` rows now.
+- **The pass source list** in `lib/Transforms/CMakeLists.txt` was repeated in
+  the unity-build section, and five files were in one copy but not the other.
+  Both are globbed per directory now. (The groups had never taken effect
+  anyway: `UNITY_GROUP` is ignored without `UNITY_BUILD_MODE GROUP`. Enabling
+  it for real exposed a `maskForWidth()` defined identically in two Data/
+  files, now in `Utils`.)
+
+#### Layout
+
+- `include/kagura/Passes.h` was 400 lines whose section headings had drifted
+  from the directory layout. One header per category under
+  `include/kagura/Passes/`, each named for the `lib/Transforms/` subdirectory
+  that implements it. `Passes.h` remains as the umbrella.
+- New `lib/Transforms/` directories: `ABI/` (`VTableProtection.cpp`, which is
+  not a CFG pass), `VM/` (`VMObfuscation.cpp`, which is not platform-specific)
+  and `Support/` for private headers. `ObfuscationMetrics.cpp` joins the other
+  non-obfuscating passes in `Infrastructure/`.
+- `scripts/` splits into `cli/` (tools you run on your own build), `eval/`
+  (measurement) and `ci/` (checks on this repository). See `scripts/README.md`.
+- The install rule now lists the shipped headers instead of globbing
+  `include/kagura/*.h`, which had been publishing the LLVM pass-plugin headers
+  to consumers who have no LLVM — and which excluded the `.def` files those
+  headers expand, so the installed `Options.h` could not be included at all.
+
 ### Known issues
 
 - **`clang -fpass-plugin=… -mllvm -kagura-…` does not work below LLVM 22.**
@@ -205,8 +267,15 @@ than having the profile preset silently overwrite it.
   1 in every function so it is not a unique key. `kagura_bb_check` is a
   documented always-pass stub. Fixing this requires the pass to emit
   post-codegen byte ranges instead.
-- `LegacyPlugin.cpp` builds in no CI job and has drifted from
-  `PassRegistry.def`. It targets LLVM ≤ 16 while the project advertises 17–22.
+- **Most of the evaluation tooling still runs in no CI job.**
+  `differential-test.sh` and `verify-reproducible.sh` are now in the matrix, but
+  `tests/redteam/`, `tests/symbolic_exec/`, `tests/decompiler_eval/` and
+  `tests/frida_resistance/` are not, so nothing checks that the resistance
+  claims in `docs/security-model.md` still hold. `scripts/eval/battery_impact.py`
+  is the only other one wired up.
+- **A JSON policy file is not validated.** An unrecognised `"profile"` name now
+  warns, but a misspelt key inside `"passes"` or `"tuning"` is still ignored in
+  silence, so `"fal": true` reads as "flattening off" with no diagnostic.
 
 ## [0.2.1] — 2026-07-31
 
