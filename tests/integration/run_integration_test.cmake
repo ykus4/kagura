@@ -26,17 +26,27 @@
 
 cmake_minimum_required(VERSION 3.14)
 
-# ---- Unique temp paths -------------------------------------------------------
-# Use TEMP env var on Windows; /tmp everywhere else.
-if(WIN32 OR CMAKE_HOST_WIN32 OR "$ENV{TEMP}" MATCHES "\\\\")
+# ---- Artefact paths ----------------------------------------------------------
+#
+# Under the build tree, not the system temp directory. Fixed /tmp names are
+# shared by every build tree on the machine, so two trees running ctest collide,
+# and any state the OS attaches to one of those paths outlives the build: on
+# macOS a system security verdict cached against
+# /tmp/kagura_int_vm_correctness_obf SIGKILLs the binary and deletes it on
+# sight, which reads as "the obfuscated binary crashed" for every future run in
+# every build tree. The identical binary written anywhere else runs fine.
+if(DEFINED WORKDIR AND NOT WORKDIR STREQUAL "")
+  set(_TMPDIR "${WORKDIR}")
+  file(MAKE_DIRECTORY "${_TMPDIR}")
+elseif(WIN32 OR CMAKE_HOST_WIN32 OR "$ENV{TEMP}" MATCHES "\\\\")
   set(_TMPDIR "$ENV{TEMP}")
 else()
   set(_TMPDIR "/tmp")
 endif()
-set(BASELINE_IR  "${_TMPDIR}/kagura_int_${TEST_NAME}_base.ll")
-set(OBF_IR       "${_TMPDIR}/kagura_int_${TEST_NAME}_obf.ll")
-set(BASELINE_BIN "${_TMPDIR}/kagura_int_${TEST_NAME}_base")
-set(OBF_BIN      "${_TMPDIR}/kagura_int_${TEST_NAME}_obf")
+set(BASELINE_IR  "${_TMPDIR}/${TEST_NAME}_base.ll")
+set(OBF_IR       "${_TMPDIR}/${TEST_NAME}_obf.ll")
+set(BASELINE_BIN "${_TMPDIR}/${TEST_NAME}_base")
+set(OBF_BIN      "${_TMPDIR}/${TEST_NAME}_obf")
 
 # ---- Compile baseline binary ------------------------------------------------
 execute_process(
