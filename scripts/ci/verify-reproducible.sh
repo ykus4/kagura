@@ -39,17 +39,29 @@ SEED="${3:-12345}"
 # --------------------------------------------------------------------------
 # Tool resolution
 # --------------------------------------------------------------------------
-CLANG="${KAGURA_CLANG:-$(command -v clang 2>/dev/null || true)}"
-OPT="${KAGURA_OPT:-$(command -v opt 2>/dev/null || true)}"
+# LLVM_PREFIX is the project's convention — build.sh and CONTRIBUTING both use
+# it — and has to be consulted before `brew --prefix llvm`. CI installs a
+# versioned formula (llvm@17 … llvm@22) and exports LLVM_PREFIX, while
+# `brew --prefix llvm` names whichever one happens to be the unversioned
+# default: on a runner with only llvm@17 installed it names nothing at all.
+#
+# The Darwin branch also used to override an explicitly-set KAGURA_CLANG.
+CLANG="${KAGURA_CLANG:-}"
+OPT="${KAGURA_OPT:-}"
 
-# Prefer Homebrew LLVM on macOS
-if [[ -z "${CLANG}" ]] || [[ "${OS}" == "Darwin" ]]; then
+if [[ -z "${CLANG}" && -n "${LLVM_PREFIX:-}" ]]; then
+    CLANG="${LLVM_PREFIX}/bin/clang"
+    OPT="${LLVM_PREFIX}/bin/opt"
+fi
+if [[ -z "${CLANG}" ]] && command -v brew >/dev/null 2>&1; then
     BREW_LLVM="$(brew --prefix llvm 2>/dev/null || true)"
-    if [[ -n "${BREW_LLVM}" ]]; then
+    if [[ -n "${BREW_LLVM}" && -x "${BREW_LLVM}/bin/clang" ]]; then
         CLANG="${BREW_LLVM}/bin/clang"
         OPT="${BREW_LLVM}/bin/opt"
     fi
 fi
+CLANG="${CLANG:-$(command -v clang 2>/dev/null || true)}"
+OPT="${OPT:-$(command -v opt 2>/dev/null || true)}"
 
 if [[ -z "${CLANG}" || ! -x "${CLANG}" ]]; then
     echo "ERROR: clang not found. Set KAGURA_CLANG or install LLVM." >&2

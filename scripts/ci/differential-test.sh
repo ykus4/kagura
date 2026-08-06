@@ -57,10 +57,20 @@ PASSES="${KAGURA_PASSES:-${DEFAULT_PASSES}}"
 # --------------------------------------------------------------------------
 # Tool resolution
 # --------------------------------------------------------------------------
+# LLVM_PREFIX is the project's convention — build.sh and CONTRIBUTING both use
+# it — and has to be consulted before `brew --prefix llvm`. CI installs a
+# versioned formula (llvm@17 … llvm@22) and exports LLVM_PREFIX, while
+# `brew --prefix llvm` names whichever one happens to be the unversioned
+# default: on a runner with only llvm@17 installed it names nothing at all, and
+# this script then died with "opt not found" the first time it ran in CI.
 CLANG="${KAGURA_CLANG:-}"
 OPT="${KAGURA_OPT:-}"
 
-if [[ -z "${CLANG}" ]] && [[ "${OS}" == "Darwin" ]]; then
+if [[ -z "${CLANG}" && -n "${LLVM_PREFIX:-}" ]]; then
+    CLANG="${LLVM_PREFIX}/bin/clang"
+    OPT="${LLVM_PREFIX}/bin/opt"
+fi
+if [[ -z "${CLANG}" ]] && command -v brew >/dev/null 2>&1; then
     BREW_LLVM="$(brew --prefix llvm 2>/dev/null || true)"
     if [[ -n "${BREW_LLVM}" && -x "${BREW_LLVM}/bin/clang" ]]; then
         CLANG="${BREW_LLVM}/bin/clang"
