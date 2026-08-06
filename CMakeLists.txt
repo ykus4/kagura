@@ -56,20 +56,6 @@ if(KAGURA_PCH)
   set(CMAKE_DISABLE_PRECOMPILE_HEADERS OFF)
 endif()
 
-# ---- Legacy pass manager compatibility ---------------------------------------
-# LegacyPlugin.cpp registers the passes with LLVM 14-16's legacy PM via
-# PassManagerBuilder extension points and RegisterPass<>. Newer LLVM has
-# removed those APIs.
-if(KAGURA_LEGACY_PM)
-  if(LLVM_VERSION_MAJOR GREATER 16)
-    message(WARNING "[kagura] KAGURA_LEGACY_PM=ON but LLVM ${LLVM_VERSION_MAJOR} "
-                    "has removed legacy PM APIs — disabling.")
-    set(KAGURA_LEGACY_PM OFF)
-  else()
-    message(STATUS "[kagura] Legacy PM shims enabled (LLVM ${LLVM_VERSION_MAJOR})")
-  endif()
-endif()
-
 # ---- Plugin linkage mode -----------------------------------------------------
 # LLVM cannot build loadable pass modules everywhere — the MSVC-targeted
 # Windows tarball ships LLVM_ENABLE_PLUGINS=OFF, so `-fpass-plugin` and
