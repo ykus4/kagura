@@ -64,7 +64,7 @@ using namespace llvm;
 
 namespace kagura {
 
-// ---- Profile presets (4.6.2) -----------------------------------------------
+// ---- Shared helpers --------------------------------------------------------
 
 /// An option the user named explicitly on the command line outranks the config
 /// file. Without this the config would silently clobber
@@ -79,61 +79,6 @@ template <typename T, typename V> static void preset(cl::opt<T> &Flag, V Value) 
     Flag = static_cast<T>(Value);
 }
 
-static void applyProfile(StringRef Profile) {
-  if (Profile.equals_insensitive("fast")) {
-    preset(opt::STR, true);
-    preset(opt::STRAES, false);
-    preset(opt::WSTR, false);
-    preset(opt::FLA, false);
-    preset(opt::BCF, false);
-    preset(opt::BBR, false);
-    preset(opt::BBS, false);
-    preset(opt::DCI, false);
-    preset(opt::SUB, false);
-    preset(opt::CO, false);
-    preset(opt::GENC, false);
-    preset(opt::MVO, false);
-  } else if (Profile.equals_insensitive("balanced")) {
-    preset(opt::STR, true);
-    preset(opt::STRAES, false);
-    preset(opt::WSTR, true);
-    preset(opt::BCF, true);
-    preset(opt::BCFProb, 20);
-    preset(opt::BCFIter, 1);
-    preset(opt::BBR, true);
-    preset(opt::BBS, true);
-    preset(opt::DCI, true);
-    preset(opt::GENC, true);
-    preset(opt::MVO, true);
-    preset(opt::FLA, false);
-    preset(opt::SUB, false);
-    preset(opt::CO, false);
-  } else if (Profile.equals_insensitive("strong")) {
-    preset(opt::STR, true);
-    preset(opt::STRAES, true);
-    preset(opt::WSTR, true);
-    preset(opt::FLA, true);
-    preset(opt::BCF, true);
-    preset(opt::BCFProb, 50);
-    preset(opt::BCFIter, 2);
-    preset(opt::BBR, true);
-    preset(opt::BBS, true);
-    preset(opt::DCI, true);
-    preset(opt::SUB, true);
-    preset(opt::SUBIter, 2);
-    preset(opt::CO, true);
-    preset(opt::GENC, true);
-    preset(opt::MVO, true);
-    preset(opt::Honey, true);
-    preset(opt::LT, true);
-    preset(opt::IBR, true);
-    preset(opt::SV, true);
-  }
-  // "custom" or unknown: no-op (use individual CLI flags)
-}
-
-// ---- JSON policy loader ----------------------------------------------------
-
 /// Map a registry CLI name to its JSON policy key: "kagura-str-aes" ->
 /// "str_aes". Deriving the key means the policy schema cannot drift from the
 /// pass list.
@@ -142,6 +87,37 @@ static std::string jsonKeyFor(StringRef Cli) {
   std::replace(Key.begin(), Key.end(), '-', '_');
   return Key;
 }
+
+// ---- Profile presets -------------------------------------------------------
+
+/// Apply the FAST / BALANCED / STRONG preset named by Profile.
+///
+/// The table lives in Profiles.def, which is also what generates
+/// integration/profiles/*.json, so a hand-written `{"profile": "BALANCED"}`
+/// and the shipped balanced.json now describe the same binary. They did not:
+/// the JSON enabled sv, anti_debug and tamper and this function did not.
+static void applyProfile(StringRef Profile) {
+  bool Known = false;
+
+#define KAGURA_PROFILE_PASS(Prof, Flag, Value)                                 \
+  if (Profile.equals_insensitive(#Prof)) {                                     \
+    preset(opt::Flag, Value);                                                  \
+    Known = true;                                                              \
+  }
+#define KAGURA_PROFILE_TUNING(Prof, Flag, Value)                               \
+  KAGURA_PROFILE_PASS(Prof, Flag, Value)
+#include "../Profiles.def"
+
+  // "custom" means "I am listing the passes myself" and is not a typo. Any
+  // other unrecognised name silently produced an unprotected build.
+  if (!Known && !Profile.equals_insensitive("custom"))
+    errs() << "[kagura] warning: unknown profile \"" << Profile
+           << "\" — expected FAST, BALANCED, STRONG or CUSTOM. No preset "
+              "applied; only the \"passes\" and \"tuning\" objects take "
+              "effect.\n";
+}
+
+// ---- JSON policy loader ----------------------------------------------------
 
 static void applyPassesObject(const json::Object &Passes) {
   auto getBool = [&](StringRef Cli, cl::opt<bool> &Flag) {
@@ -157,28 +133,29 @@ static void applyPassesObject(const json::Object &Passes) {
   // diagnostic.
 #define KAGURA_FN_PASS(Flag, Cli, Desc, Ctor)  getBool(Cli, opt::Flag);
 #define KAGURA_MOD_PASS(Flag, Cli, Desc, Ctor) getBool(Cli, opt::Flag);
-#include "../PassRegistry.def"
+#include "kagura/PassRegistry.def"
 
   if (!setByUser(opt::DWARFMode))
     if (auto DwarfVal = Passes.getString("dwarf"))
       opt::DWARFMode = DwarfVal->str();
 }
 
-static void applyTuningObject(const json::Object &Tuning) {
-  auto getU32 = [&](StringRef Key, cl::opt<uint32_t> &Flag) {
-    if (setByUser(Flag))
-      return;
-    if (auto V = Tuning.getInteger(Key))
-      Flag = static_cast<uint32_t>(*V);
-  };
-  getU32("bcf_prob", opt::BCFProb);
-  getU32("bcf_iter", opt::BCFIter);
-  getU32("sub_iter", opt::SUBIter);
-  getU32("dci_prob", opt::DCIProb);
+/// Read one numeric tuning key, keyed off the registry row so the JSON schema
+/// stays derived from the flag set. This used to hold its own copy of the
+/// key-to-flag mapping.
+template <typename T>
+static void readTuning(const json::Object &Tuning, StringRef Cli,
+                       cl::opt<T> &Flag) {
+  if (setByUser(Flag))
+    return;
+  if (auto V = Tuning.getInteger(jsonKeyFor(Cli)))
+    Flag = static_cast<T>(*V);
+}
 
-  if (!setByUser(opt::Seed))
-    if (auto Seed = Tuning.getInteger("seed"))
-      opt::Seed = static_cast<uint64_t>(*Seed);
+static void applyTuningObject(const json::Object &Tuning) {
+#define KAGURA_TUNING(Flag, Cli, Type, Default, Desc)                          \
+  readTuning(Tuning, Cli, opt::Flag);
+#include "kagura/PassRegistry.def"
 }
 
 // ---- Entry point ------------------------------------------------------------

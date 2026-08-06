@@ -48,20 +48,25 @@ Built-in profiles selected by the `"profile"` key:
 
 | Profile | Passes enabled | Tuning | Intended use |
 |:--------|:---------------|:-------|:-------------|
-| `FAST`     | `str` | — | Debug / CI builds with minimal overhead |
-| `BALANCED` | `str` `wstr` `bcf` `bbr` `bbs` `dci` `genc` `mvo` | `bcf_prob` 20, `bcf_iter` 1 | Standard release builds |
-| `STRONG`   | `str` `str-aes` `wstr` `fla` `bcf` `sub` `co` `ibr` `lt` `bbr` `bbs` `dci` `genc` `mvo` `sv` `honey` | `bcf_prob` 50, `bcf_iter` 2, `sub_iter` 2 | Security-critical shipping builds |
+| `FAST`     | `str` `sv` `anti-debug` | — | Debug / CI builds with minimal overhead |
+| `BALANCED` | `str` `wstr` `bcf` `bbr` `bbs` `dci` `genc` `mvo` `sv` `anti-debug` `tamper` | `bcf_prob` 20, `bcf_iter` 1 | Standard release builds |
+| `STRONG`   | `str` `str-aes` `wstr` `fla` `bcf` `sub` `co` `ibr` `lt` `bbr` `bbs` `dci` `genc` `mvo` `sv` `honey` `anti-debug` `tamper` | `bcf_prob` 50, `bcf_iter` 2, `sub_iter` 2 | Security-critical shipping builds |
 
-`STRONG` is not "every pass". It deliberately leaves off the passes that need
-a linked `kagura_runtime`, change the ABI, or carry an outsized cost:
-`anti-debug`, `tamper`, `ci`, `pac`, `vm`, `fsplit`, `pe`, `elt`, `vtp`,
-`bbcheck`, `telemetry` and `string-split`. Enable those explicitly in the
-`passes` object when you want them.
+Every profile enables `anti-debug`, so **a profile build must link
+`kagura_runtime`.**
+
+`STRONG` is not "every pass". It deliberately leaves off the passes that change
+the ABI, need a specific target, or carry an outsized cost: `ci`, `pac`, `vm`,
+`fsplit`, `pe`, `elt`, `vtp`, `bbcheck`, `telemetry`, `cse-break` and
+`string-split`. Enable those explicitly in the `passes` object when you want
+them.
 
 The ready-made files in
 [`integration/profiles/`](https://github.com/ykus4/kagura/tree/main/integration/profiles)
-start from these presets and then set some of the above explicitly — read the
-file rather than assuming it matches the preset exactly.
+restate exactly these presets — both they and the compiled presets are
+generated from `lib/Transforms/Profiles.def`, so a profile name means the same
+thing whichever way you select it. (Until recently it did not: the JSON files
+enabled `sv`, `anti-debug` and `tamper` that the compiled preset skipped.)
 
 A profile sets defaults; anything in `"passes"` or `"tuning"` overrides the
 profile's choices for that specific key.

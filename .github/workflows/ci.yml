@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  # ---- Generated files ----------------------------------------------------
+  # integration/profiles/*.json is generated from lib/Transforms/Profiles.def,
+  # the same table ConfigLoader.cpp compiles the presets from. Editing one and
+  # not the other is exactly how the JSON came to enable sv / anti_debug /
+  # tamper while the compiled preset did not, so a hand-written
+  # `{"profile": "BALANCED"}` shipped a weaker binary than balanced.json.
+  #
+  # Needs no LLVM, so it runs first and fails fast.
+  generated:
+    name: Generated files are up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check integration/profiles/*.json
+        run: python3 scripts/ci/gen-profiles.py --check
+
   # ---- Assertions build ---------------------------------------------------
   # Every other job builds Release, which defines NDEBUG and compiles assert()
   # out. Three real bugs lived behind those assertions: two APInt width

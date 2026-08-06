@@ -1,4 +1,5 @@
 {
+  "_generated": "DO NOT EDIT — generated from lib/Transforms/Profiles.def by scripts/ci/gen-profiles.py",
   "profile": "STRONG",
   "passes": {
     "str": true,
@@ -28,7 +29,6 @@
     "bcf_prob": 50,
     "bcf_iter": 2,
     "sub_iter": 2,
-    "dci_prob": 40,
-    "seed": 0
+    "dci_prob": 40
   }
 }

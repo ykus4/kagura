@@ -1,4 +1,5 @@
 {
+  "_generated": "DO NOT EDIT — generated from lib/Transforms/Profiles.def by scripts/ci/gen-profiles.py",
   "profile": "BALANCED",
   "passes": {
     "str": true,
@@ -19,16 +20,15 @@
     "co": false,
     "ibr": false,
     "lt": false,
+    "honey": false,
     "fsplit": false,
     "pe": false,
-    "honey": false,
     "vm": false
   },
   "tuning": {
     "bcf_prob": 20,
     "bcf_iter": 1,
     "sub_iter": 1,
-    "dci_prob": 40,
-    "seed": 0
+    "dci_prob": 40
   }
 }
