@@ -12,51 +12,21 @@
 namespace kagura {
 namespace opt {
 
-// ---- Pass enable flags ----
-extern llvm::cl::opt<bool> FLA;
-extern llvm::cl::opt<bool> BCF;
-extern llvm::cl::opt<bool> SUB;
-extern llvm::cl::opt<bool> CSEBreak;
-extern llvm::cl::opt<bool> STR;
-extern llvm::cl::opt<bool> STRAES;
-extern llvm::cl::opt<bool> STRSplit;
-extern llvm::cl::opt<bool> AntiDebug;
-extern llvm::cl::opt<bool> ObjC;
-extern llvm::cl::opt<bool> JNI;
-extern llvm::cl::opt<bool> CO;
-extern llvm::cl::opt<bool> VM;
-extern llvm::cl::opt<bool> Metrics;
-extern llvm::cl::opt<bool> BBR;
-extern llvm::cl::opt<bool> DCI;
-extern llvm::cl::opt<bool> FSplit;
-extern llvm::cl::opt<bool> BBS;
-extern llvm::cl::opt<bool> SV;
-extern llvm::cl::opt<bool> IBR;
-extern llvm::cl::opt<bool> LT;
-extern llvm::cl::opt<bool> Tamper;
-extern llvm::cl::opt<bool> CI;
-extern llvm::cl::opt<bool> PAC;
-extern llvm::cl::opt<bool> GENC;
-
-/// XOR-encrypt alloca'd pointer values to defeat memory dump analysis.
-extern llvm::cl::opt<bool> PE;
-
-/// Inject telemetry event calls at function entry.
-extern llvm::cl::opt<bool> Telemetry;
-
-/// Inject basic-block-level opcode checksum guards.
-extern llvm::cl::opt<bool> BBCheck;
-extern llvm::cl::opt<bool> VTP;
-extern llvm::cl::opt<bool> ELT;
-
-// ---- Pass tuning parameters ----
-extern llvm::cl::opt<uint32_t> BCFProb;
-extern llvm::cl::opt<uint32_t> BCFIter;
-extern llvm::cl::opt<uint32_t> SUBIter;
-extern llvm::cl::opt<uint32_t> DCIProb;
-extern llvm::cl::opt<uint64_t> Seed;
+// ---- Per-pass enable flags and tuning parameters ----
+//
+// Generated from the same registry Options.cpp defines them from, so the
+// declarations cannot drift from the definitions. The list used to be written
+// out by hand here while Options.cpp already generated its half.
+#define KAGURA_FN_PASS(Flag, Cli, Desc, Ctor)  extern llvm::cl::opt<bool> Flag;
+#define KAGURA_MOD_PASS(Flag, Cli, Desc, Ctor) extern llvm::cl::opt<bool> Flag;
+#define KAGURA_TUNING(Flag, Cli, Type, Default, Desc)                          \
+  extern llvm::cl::opt<Type> Flag;
+#include "kagura/PassRegistry.def"
 
 // ---- Infrastructure flags ----
+
+/// Print per-function basic-block / instruction / complexity deltas.
+extern llvm::cl::opt<bool> Metrics;
 
 /// Enable protection during LTO/ThinLTO pipeline phases.
 /// When false (default), kagura skips module passes that are unsafe to run
@@ -73,19 +43,10 @@ extern llvm::cl::opt<bool> O0Protect;
 ///   "obfuscate" — remap source locations to synthetic coordinates.
 extern llvm::cl::opt<std::string> DWARFMode;
 
-// ---- Data-protection flags ----
-
-/// Encrypt wide-character (wchar_t / char16_t / char32_t) string
-/// literals and ObjC/CoreFoundation CFString backing buffers.
-extern llvm::cl::opt<bool> WSTR;
-
-// ---- Game / anti-cheat flags ----
-
-/// In-memory integer variable XOR obfuscation.
-extern llvm::cl::opt<bool> MVO;
-
-/// Honey value / decoy variable and fake symbol injection.
-extern llvm::cl::opt<bool> Honey;
+/// RTTI / vtable protection (C++ ABI). An infrastructure pass rather than a
+/// registry row, because Plugin.cpp injects it at a fixed point in the
+/// pipeline rather than in registry order.
+extern llvm::cl::opt<bool> VTP;
 
 // ---- Build-system / DX flags ----
 

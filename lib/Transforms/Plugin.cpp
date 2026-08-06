@@ -45,7 +45,7 @@ llvm::PassPluginLibraryInfo getKaguraPluginInfo() {
                     FPM.addPass(Ctor);                                         \
                     return true;                                               \
                   }
-#include "PassRegistry.def"
+#include "kagura/PassRegistry.def"
                   // `kagura-anti-debug` is module-level but historically also
                   // accepted in the function-pass position as a no-op for
                   // callers using `function(...)` wrappers.
@@ -63,7 +63,7 @@ llvm::PassPluginLibraryInfo getKaguraPluginInfo() {
                     MPM.addPass(Ctor);                                         \
                     return true;                                               \
                   }
-#include "PassRegistry.def"
+#include "kagura/PassRegistry.def"
                   // Infrastructure passes outside the auto-pipeline table —
                   // these have ordering or conditional quirks and are injected
                   // explicitly in the OptimizerLast block below, but are still
@@ -73,7 +73,7 @@ llvm::PassPluginLibraryInfo getKaguraPluginInfo() {
                     MPM.addPass(Ctor);                                         \
                     return true;                                               \
                   }
-#include "PassRegistry.def"
+#include "kagura/PassRegistry.def"
                   return false;
                 });
 
@@ -155,7 +155,7 @@ llvm::PassPluginLibraryInfo getKaguraPluginInfo() {
 #define KAGURA_MOD_PASS(Flag, Cli, Desc, Ctor)                                 \
                   if (opt::Flag)                                               \
                     MPM.addPass(Ctor);
-#include "PassRegistry.def"
+#include "kagura/PassRegistry.def"
 
                   // --- Function-level passes (table-driven) ---
                   FunctionPassManager FPM;
@@ -165,7 +165,7 @@ llvm::PassPluginLibraryInfo getKaguraPluginInfo() {
                     FPM.addPass(Ctor);                                         \
                     HasFunctionPass = true;                                    \
                   }
-#include "PassRegistry.def"
+#include "kagura/PassRegistry.def"
                   if (HasFunctionPass)
                     MPM.addPass(createModuleToFunctionPassAdaptor(
                         std::move(FPM)));
