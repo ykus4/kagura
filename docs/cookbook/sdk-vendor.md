@@ -122,12 +122,12 @@ licensed operations, send telemetry, etc.) — your SDK does **not** crash.
 
 ## Per-customer variants
 
-Use `scripts/variant_generator.py` to produce a different XOR key set per
+Use `scripts/cli/variant_generator.py` to produce a different XOR key set per
 customer. If customer A's binary leaks, attackers can't reuse the key
 extraction against customer B:
 
 ```bash
-python3 scripts/variant_generator.py \
+python3 scripts/cli/variant_generator.py \
     --config kagura-sdk-release.json \
     --customer-id ACME-CORP \
     --out kagura-acme.json

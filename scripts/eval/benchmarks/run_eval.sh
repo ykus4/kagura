@@ -15,14 +15,14 @@
 # Usage: bash run_eval.sh [/path/to/kagura_root]
 set -euo pipefail
 
-KAGURA="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
+KAGURA="${1:-$(cd "$(dirname "$0")/../../.." && pwd)}"
 BENCH="$(cd "$(dirname "$0")" && pwd)"
 RESULTS="$BENCH/../results"
 PLUGIN="$KAGURA/build/lib/Transforms/KaguraObfuscator.dylib"
 CLANG="/opt/homebrew/opt/llvm/bin/clang"
 OBJDUMP="/opt/homebrew/opt/llvm/bin/llvm-objdump"
 PYTHON="$KAGURA/.venv/bin/python3"
-COST_MODEL="$KAGURA/scripts/attacker_cost_model.py"
+COST_MODEL="$KAGURA/scripts/eval/attacker_cost_model.py"
 ANGR_EVAL="$KAGURA/tests/symbolic_exec/run_angr_eval.py"
 FUNC_SRC="$BENCH/eval_functions.c"
 MAIN_SRC="$BENCH/eval_main.c"

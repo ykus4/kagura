@@ -51,5 +51,5 @@ command line, or under the `"tuning"` key in a [JSON policy file](configuration.
 ## Reproducibility
 
 Setting `-kagura-seed=<N>` to a non-zero value makes the entire pipeline
-deterministic. Pair with `scripts/verify-reproducible.sh` to confirm two
+deterministic. Pair with `scripts/ci/verify-reproducible.sh` to confirm two
 builds produce byte-identical IR — see [Testing & Evaluation](testing.md).

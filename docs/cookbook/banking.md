@@ -150,10 +150,10 @@ cd tests/frida_resistance
 for s in probes/F*.js; do frida -l "$s" -f YourApp.app/YourApp; done
 
 # 4. App Store review risk assessment
-./scripts/review-risk-assessment.sh YourApp.app/YourApp --platform ios
+./scripts/cli/review-risk-assessment.sh YourApp.app/YourApp --platform ios
 
 # 5. Confirm the release build actually obfuscated what you asked for
-./scripts/kagura-diff.py baseline.dylib release.dylib --html report.html
+./scripts/cli/kagura-diff.py baseline.dylib release.dylib --html report.html
 ```
 
 ## What's still on you

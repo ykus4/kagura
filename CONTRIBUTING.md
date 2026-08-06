@@ -101,7 +101,7 @@ cd build && ctest -R lit-filecheck --output-on-failure
 To run the differential tests (obfuscated vs. plain output comparison):
 
 ```bash
-./scripts/differential-test.sh
+./scripts/ci/differential-test.sh
 ```
 
 ## Code Style
@@ -118,7 +118,7 @@ To run the differential tests (obfuscated vs. plain output comparison):
 
 - One pass or feature per PR
 - Include a FileCheck test (`.ll`) that verifies the pass transformation
-- Run `./scripts/differential-test.sh` locally and confirm no regressions
+- Run `./scripts/ci/differential-test.sh` locally and confirm no regressions
 - CI must be green before merge
 
 ## Release Process

@@ -36,7 +36,7 @@ python3 run_redteam.py --binary /tmp/kagura_rt_subject --report report.json
 | `../symbolic_exec/run_angr_eval.py` | angr symbolic execution eval |
 | `../decompiler_eval/run_ghidra_eval.py` | Ghidra decompilation quality eval |
 | `../frida_resistance/probes/` | Frida instrumentation resistance probes |
-| `../../scripts/attacker_cost_model.py` | Attacker effort cost model |
+| `../../scripts/eval/attacker_cost_model.py` | Attacker effort cost model |
 
 ## Report format
 

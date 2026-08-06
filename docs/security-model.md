@@ -70,7 +70,7 @@ StrongBox, Secure Enclave).
 Kagura raises the cost in **analyst-hours**. A well-resourced adversary will
 eventually deobfuscate everything. The goal is to move the bar above your
 target attacker's economic threshold — measured for your use case via
-`scripts/attacker_cost_model.py` and the angr / Ghidra / Frida resistance
+`scripts/eval/attacker_cost_model.py` and the angr / Ghidra / Frida resistance
 suites under `tests/`.
 
 ### Side-effects from the operating system
@@ -90,7 +90,7 @@ These are the assumptions that, when violated, weaken Kagura's protections.
 If a single source file in the build is compiled without `-fpass-plugin=…`,
 its strings and CFG are plaintext. Build-system integration matters — see
 [Integration](integration/index.md) and audit the build with
-`scripts/kagura-cli.py audit-log` or `-kagura-audit`.
+`scripts/cli/kagura-cli.py audit-log` or `-kagura-audit`.
 
 ### 2. The pass order is preserved
 `kagura-tamper` measures function checksums **before** CFG-mutating passes
@@ -108,7 +108,7 @@ early, but also means missing the runtime means missing the protection.
 Setting `-kagura-seed=0` (entropy default) produces a different binary each
 build. Forensically that's good (per-binary watermarking is implicit), but it
 also means **per-build variant generation is on you** — use
-`scripts/variant_generator.py` if you ship per-customer variants.
+`scripts/cli/variant_generator.py` if you ship per-customer variants.
 
 ### 5. Anti-tamper response is sensible
 `kagura-tamper`'s default response is `abort()`, which gives a clean crash
@@ -126,12 +126,12 @@ binary, not just trust marketing claims.
 
 | Tool | Question it answers |
 |:-----|:--------------------|
-| `scripts/attacker_cost_model.py`  | "How many analyst-hours does this configuration cost an attacker?" |
+| `scripts/eval/attacker_cost_model.py`  | "How many analyst-hours does this configuration cost an attacker?" |
 | `tests/symbolic_exec/run_angr_eval.py` | "Does my binary survive 30-minute angr concolic execution?" |
 | `tests/decompiler_eval/run_ghidra_eval.py` | "Does Ghidra reconstruct readable C from my binary?" |
 | `tests/frida_resistance/` | "Are my hook / breakpoint / debugger probes catching the F1–F8 Frida vectors?" |
-| `scripts/review-risk-assessment.sh` | "Will the App Store / Play Store reject my binary for the protections I added?" |
-| `scripts/kagura-diff.py` | "Did my release build actually hide the symbols and encrypt the strings it was supposed to?" |
+| `scripts/cli/review-risk-assessment.sh` | "Will the App Store / Play Store reject my binary for the protections I added?" |
+| `scripts/cli/kagura-diff.py` | "Did my release build actually hide the symbols and encrypt the strings it was supposed to?" |
 
 Run these on **your own representative builds**. The numbers in
 [Performance & Size Impact](passes/performance.md) are illustrative; the only

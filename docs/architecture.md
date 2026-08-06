@@ -32,7 +32,10 @@ kagura/
 │   ├── windows/            Windows: IsDebuggerPresent, NtQueryInformationProcess, PE integrity
 │   └── game/               Anti-cheat, IL2CPP protection, telemetry
 ├── integration/            Xcode, Gradle, Unity, Unreal, CMake, Bazel, CocoaPods, SPM
-├── scripts/                CLI tools, verification, differential testing, review risk assessment
+├── scripts/
+│   ├── cli/                Tools you run on your own build (config, strip, diff, variants)
+│   ├── eval/               Cost model, battery estimate, benchmarks
+│   └── ci/                 Differential test, reproducible-build check, profile generator
 └── tests/                  CTest + FileCheck lit-based regression tests
 ```
 

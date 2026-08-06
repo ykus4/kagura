@@ -15,7 +15,7 @@
 
 - [ ] `ctest --output-on-failure` passes locally
 - [ ] FileCheck lit test added (for new passes / IR transformations)
-- [ ] `./scripts/differential-test.sh` shows no regression
+- [ ] `./scripts/ci/differential-test.sh` shows no regression
 - [ ] `mkdocs build --strict` passes (for docs-touching changes)
 
 ## Risk

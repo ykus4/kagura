@@ -6,7 +6,7 @@
 # output the diff will be non-empty and the script exits with status 1.
 #
 # Usage:
-#   ./scripts/verify-reproducible.sh [plugin_path] [input_c_file] [seed]
+#   ./scripts/ci/verify-reproducible.sh [plugin_path] [input_c_file] [seed]
 #
 # Defaults:
 #   plugin_path  = ./build/lib/KaguraObfuscator.dylib  (macOS)
@@ -25,7 +25,7 @@ set -euo pipefail
 # Defaults
 # --------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 OS="$(uname -s)"
 if [[ "${OS}" == "Darwin" ]]; then
