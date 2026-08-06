@@ -46,7 +46,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "kagura/Passes.h"
+#include "kagura/Passes/VM.h"
 #include "kagura/Utils.h"
 #include "kagura/VM.h"
 

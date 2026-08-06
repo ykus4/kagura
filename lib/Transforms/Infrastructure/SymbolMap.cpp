@@ -30,7 +30,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "kagura/Options.h"
-#include "kagura/Passes.h"
+#include "kagura/Passes/Infrastructure.h"
 
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/Function.h"

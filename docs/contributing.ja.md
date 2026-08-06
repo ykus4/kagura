@@ -38,7 +38,7 @@ cd build && ctest --output-on-failure
 
 - パス / 機能 ごとに1 PR
 - パス変換を検証する FileCheck テスト (`.ll`) を含める
-- `./scripts/differential-test.sh` をローカル実行し回帰なしを確認
+- `./scripts/ci/differential-test.sh` をローカル実行し回帰なしを確認
 - マージ前に CI がグリーンであること
 
 ## ライセンス

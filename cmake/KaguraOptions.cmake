@@ -35,10 +35,6 @@ option(KAGURA_BITCODE_TOOLS
 
 # ---- Compatibility -----------------------------------------------------------
 
-option(KAGURA_LEGACY_PM
-       "Build the legacy pass-manager shims. Requires LLVM <= 16; newer LLVM \
-has removed the APIs" OFF)
-
 option(KAGURA_FORCE_STATIC_PLUGIN
        "Link the passes statically into kagura-opt even where loadable modules \
 work, so the Windows linkage path can be exercised from macOS/Linux CI" OFF)

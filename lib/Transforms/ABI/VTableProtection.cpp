@@ -37,7 +37,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "kagura/Options.h"
-#include "kagura/Passes.h"
+#include "kagura/Passes/ABI.h"
 #include "kagura/Utils.h"
 
 #include "llvm/IR/Constants.h"

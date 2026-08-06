@@ -1,4 +1,5 @@
 {
+  "_generated": "DO NOT EDIT — generated from lib/Transforms/Profiles.def by scripts/ci/gen-profiles.py",
   "profile": "FAST",
   "passes": {
     "str": true,
@@ -16,19 +17,18 @@
     "bbr": false,
     "bbs": false,
     "dci": false,
-    "fsplit": false,
     "genc": false,
     "mvo": false,
-    "pe": false,
     "honey": false,
     "tamper": false,
+    "fsplit": false,
+    "pe": false,
     "vm": false
   },
   "tuning": {
     "bcf_prob": 30,
     "bcf_iter": 1,
     "sub_iter": 1,
-    "dci_prob": 40,
-    "seed": 0
+    "dci_prob": 40
   }
 }

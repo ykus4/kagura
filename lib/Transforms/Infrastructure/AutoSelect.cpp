@@ -29,7 +29,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "kagura/Options.h"
-#include "kagura/Passes.h"
+#include "kagura/Passes/Infrastructure.h"
 #include "kagura/Utils.h"
 
 #include "llvm/ADT/SmallVector.h"

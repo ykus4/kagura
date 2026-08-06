@@ -135,7 +135,7 @@ set(KAGURA_LINK_SUBJECTS
 # Function-level passes must be wrapped in function(...) for opt; module-level
 # passes are named directly. The registry already records which is which, so
 # read the macro name alongside the CLI name rather than maintaining a list.
-file(STRINGS ${PROJECT_SOURCE_DIR}/lib/Transforms/PassRegistry.def
+file(STRINGS ${PROJECT_SOURCE_DIR}/include/kagura/PassRegistry.def
      KAGURA_PASS_ROWS
      REGEX "^KAGURA_(FN|MOD)_PASS\\(")
 

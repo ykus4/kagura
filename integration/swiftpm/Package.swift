@@ -77,6 +77,10 @@ let package = Package(
             publicHeadersPath: "integration/swiftpm/include",
             cSettings: [
                 .define("KAGURA_SWIFTPM"),
+                // Not public, but on the search path: core/vm_interpreter.c
+                // includes kagura/VMOpcodes.def, the one copy of the bytecode
+                // opcode numbers it shares with the pass.
+                .headerSearchPath("include"),
             ],
             linkerSettings: [
                 // dlopen/dladdr (crash symbolication, anti-debug)

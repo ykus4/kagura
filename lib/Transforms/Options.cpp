@@ -3,9 +3,10 @@
 // Single source of truth for all -kagura-* command-line flags.
 // Include "kagura/Options.h" to access them from any pass.
 //
-// Per-pass enable flags are generated from PassRegistry.def so they cannot
-// drift from the pass list. Tuning parameters and infrastructure-only flags
-// are still defined by hand below.
+// Per-pass enable flags and numeric tuning parameters are generated from
+// kagura/PassRegistry.def so they cannot drift from the pass list. Only the
+// infrastructure flags that have no registry row — string-valued options and
+// pipeline switches that are not per-pass — are defined by hand below.
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,36 +17,19 @@ using namespace llvm;
 namespace kagura {
 namespace opt {
 
-// ---- Per-pass enable flags (generated from PassRegistry.def) ----
-// Each row of the registry expands to:
-//   cl::opt<bool> Flag("kagura-name",
-//                      cl::desc("[Kagura] <description>"),
-//                      cl::init(false));
+// ---- Per-pass enable flags and tuning parameters (from PassRegistry.def) ----
+// Each row of the registry expands to one cl::opt definition:
+//   cl::opt<bool>     Flag(Cli, cl::desc("[Kagura] " Desc), cl::init(false));
+//   cl::opt<uint32_t> Flag(Cli, cl::desc("[Kagura] " Desc), cl::init(Default));
 #define KAGURA_BOOL_OPT(Flag, Cli, Desc)                                       \
   cl::opt<bool> Flag(Cli, cl::desc("[Kagura] " Desc), cl::init(false));
 
 #define KAGURA_FN_PASS(Flag, Cli, Desc, Ctor)  KAGURA_BOOL_OPT(Flag, Cli, Desc)
 #define KAGURA_MOD_PASS(Flag, Cli, Desc, Ctor) KAGURA_BOOL_OPT(Flag, Cli, Desc)
-#include "PassRegistry.def"
+#define KAGURA_TUNING(Flag, Cli, Type, Default, Desc)                          \
+  cl::opt<Type> Flag(Cli, cl::desc("[Kagura] " Desc), cl::init(Default));
+#include "kagura/PassRegistry.def"
 #undef KAGURA_BOOL_OPT
-
-// ---- Pass tuning parameters ----
-
-cl::opt<uint32_t> BCFProb("kagura-bcf-prob",
-                          cl::desc("[Kagura] Bogus CF probability [0-100]"),
-                          cl::init(30));
-cl::opt<uint32_t> BCFIter("kagura-bcf-iter",
-                          cl::desc("[Kagura] Bogus CF iterations"),
-                          cl::init(1));
-cl::opt<uint32_t> SUBIter("kagura-sub-iter",
-                          cl::desc("[Kagura] Substitution iterations"),
-                          cl::init(1));
-cl::opt<uint32_t> DCIProb("kagura-dci-prob",
-                          cl::desc("[Kagura] Dead code insertion probability [0-100]"),
-                          cl::init(40));
-cl::opt<uint64_t> Seed("kagura-seed",
-                       cl::desc("[Kagura] PRNG seed (0 = entropy)"),
-                       cl::init(0));
 
 // ---- Infrastructure / pipeline-control flags ----
 

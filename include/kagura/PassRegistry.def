@@ -17,7 +17,11 @@
 //              BogusControlFlowPass(opt::BCFProb, opt::BCFIter))
 //
 // Adding a new pass = add ONE row here + write the .cpp + declare the
-// `Pass` struct in include/kagura/Passes.h.
+// `Pass` struct under include/kagura/Passes/.
+//
+// This file lives next to the headers rather than in lib/ because Options.h
+// includes it to generate its extern declarations, and an installed public
+// header cannot reach into lib/.
 //
 // Order within each section matches Plugin.cpp's OptimizerLast pipeline
 // order, so the auto-registered pipeline stays deterministic.
@@ -43,6 +47,20 @@
 //       them; only the injection ordering stays hand-written.
 #ifndef KAGURA_INFRA_PASS
 #define KAGURA_INFRA_PASS(Cli, Ctor)
+#endif
+
+//   KAGURA_TUNING(FlagName, CliName, Type, Default, Desc)
+//       Numeric tuning parameter. One row generates all three places the
+//       parameter has to appear: the cl::opt definition (Options.cpp), its
+//       extern declaration (Options.h) and the reader for the "tuning" object
+//       of a JSON policy file (ConfigLoader.cpp).
+//
+//       The JSON key is derived from CliName exactly as pass keys are —
+//       "kagura-bcf-prob" -> "bcf_prob" — so the policy schema cannot drift
+//       from the flag set either. ConfigLoader used to hold its own copy of
+//       the key-to-flag mapping.
+#ifndef KAGURA_TUNING
+#define KAGURA_TUNING(Flag, Cli, Type, Default, Desc)
 #endif
 
 // ---- Module-level passes (run on the whole Module) ----
@@ -87,6 +105,14 @@ KAGURA_INFRA_PASS("kagura-symmap",        SymbolMapPass())
 KAGURA_INFRA_PASS("kagura-vtp",           VTableProtectionPass())
 KAGURA_INFRA_PASS("kagura-audit",         AuditLogPass())
 
+// ---- Numeric tuning parameters ----
+KAGURA_TUNING(BCFProb, "kagura-bcf-prob", uint32_t, 30, "Bogus CF probability [0-100]")
+KAGURA_TUNING(BCFIter, "kagura-bcf-iter", uint32_t,  1, "Bogus CF iterations")
+KAGURA_TUNING(SUBIter, "kagura-sub-iter", uint32_t,  1, "Substitution iterations")
+KAGURA_TUNING(DCIProb, "kagura-dci-prob", uint32_t, 40, "Dead code insertion probability [0-100]")
+KAGURA_TUNING(Seed,    "kagura-seed",     uint64_t,  0, "PRNG seed (0 = entropy)")
+
 #undef KAGURA_FN_PASS
 #undef KAGURA_MOD_PASS
 #undef KAGURA_INFRA_PASS
+#undef KAGURA_TUNING

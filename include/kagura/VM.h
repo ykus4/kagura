@@ -1,10 +1,13 @@
 #pragma once
 //===-- VM.h - Virtual Machine obfuscation definitions --------------------===//
 //
-// Defines the bytecode instruction set that kagura's VM obfuscation pass emits
-// and that runtime/core/vm_interpreter.c executes.  The two files are a single
-// contract: every constant here has a mirrored #define there and they must be
-// changed together.
+// The C++ view of the bytecode instruction set that kagura's VM obfuscation
+// pass emits and that runtime/core/vm_interpreter.c executes.
+//
+// The numbers themselves, and the per-opcode operand documentation, live in
+// kagura/VMOpcodes.def, which the C interpreter includes too. This header used
+// to spell them out and so did the interpreter, with a comment in each telling
+// the reader to remember the other.
 //
 // Architecture overview:
 //
@@ -51,109 +54,24 @@
 namespace kagura {
 namespace vm {
 
-// ── Opcode definitions ──────────────────────────────────────────────────────
+// ── Opcodes and frame limits ────────────────────────────────────────────────
+//
+// From kagura/VMOpcodes.def, which documents each opcode's operands and is the
+// same file the C interpreter reads its numbers out of.
 
 enum Opcode : uint8_t {
-  // Stack operations
-  OP_PUSH_IMM8   = 0x00, // u8  imm            : push zero-extended immediate
-  OP_PUSH_IMM16  = 0x01, // u16 imm
-  OP_PUSH_IMM32  = 0x02, // u32 imm
-  OP_PUSH_IMM64  = 0x03, // u64 imm
-  OP_PUSH_REG    = 0x04, // u8  reg            : push virtual register
-  OP_POP_REG     = 0x05, // u8  reg            : pop into virtual register
-  OP_DUP         = 0x06,
-  OP_SWAP        = 0x07,
-  OP_PUSH_POOL   = 0x08, // u16 index          : push pool[index]
-  OP_PUSH_FRAME  = 0x09, // u16 offset         : push &frame_arena[offset]
-  OP_SELECT      = 0x0A, //                    : pop f, pop t, pop c; push c?t:f
-  OP_DROP        = 0x0B,
-
-  // Arithmetic — each takes a u8 result width in bits (1..64).
-  // Pops b then a, pushes the width-masked result of `a op b`.
-  OP_ADD         = 0x10,
-  OP_SUB         = 0x11,
-  OP_MUL         = 0x12,
-  OP_UDIV        = 0x13,
-  OP_SDIV        = 0x14,
-  OP_UREM        = 0x15,
-  OP_SREM        = 0x16,
-
-  // Bitwise — also width-tagged.
-  OP_AND         = 0x20,
-  OP_OR          = 0x21,
-  OP_XOR         = 0x22,
-  OP_NOT         = 0x23, // pop 1, push 1
-  OP_SHL         = 0x24,
-  OP_LSHR        = 0x25,
-  OP_ASHR        = 0x26,
-
-  // Comparison — u8 operand width; pushes 0 or 1.
-  OP_ICMP_EQ     = 0x30,
-  OP_ICMP_NE     = 0x31,
-  OP_ICMP_ULT    = 0x32,
-  OP_ICMP_ULE    = 0x33,
-  OP_ICMP_UGT    = 0x34,
-  OP_ICMP_UGE    = 0x35,
-  OP_ICMP_SLT    = 0x36,
-  OP_ICMP_SLE    = 0x37,
-  OP_ICMP_SGT    = 0x38,
-  OP_ICMP_SGE    = 0x39,
-
-  // Control flow
-  OP_JMP         = 0x40, // u32 target         : unconditional
-  OP_JZ          = 0x41, // u32 target         : pop; jump if zero
-  OP_JNZ         = 0x42, // u32 target         : pop; jump if non-zero
-  OP_CALL        = 0x43, // u8 nargs, u8 retw  : pop args (last on top), pop
-                         //                      callee address, call natively;
-                         //                      retw == 0 means void (nothing
-                         //                      is pushed), else the result is
-                         //                      masked to retw bits.
-  OP_RET         = 0x44, // pop and return
-  OP_RET_VOID    = 0x45, // return 0
-
-  // Memory — the pointer is the deeper stack slot, the value the shallower one.
-  OP_LOAD8       = 0x50, // pop ptr, push zero-extended i8
-  OP_LOAD16      = 0x51,
-  OP_LOAD32      = 0x52,
-  OP_LOAD64      = 0x53,
-  OP_STORE8      = 0x54, // pop val, pop ptr, store
-  OP_STORE16     = 0x55,
-  OP_STORE32     = 0x56,
-  OP_STORE64     = 0x57,
-
-  // Type conversions
-  OP_ZEXT        = 0x60, // no operand: canonical form is already zero-extended
-  OP_SEXT        = 0x61, // u8 source width
-  OP_TRUNC       = 0x62, // u8 destination width
-
-  // Argument passing
-  OP_LOAD_ARG    = 0x70, // u8 index           : push args[index]
-  OP_NOP         = 0xFF,
+#define KAGURA_VM_OP(Name, Value) Name = Value,
+#include "kagura/VMOpcodes.def"
 };
 
-// ── Limits (mirrored in runtime/core/vm_interpreter.c) ──────────────────────
+#define KAGURA_VM_LIMIT(CppName, CName, Value)                                 \
+  static constexpr unsigned CppName = Value;
+#include "kagura/VMOpcodes.def"
 
-/// Virtual registers per frame.  Register operands are one byte, so this may
-/// not exceed 256.
-static constexpr unsigned kNumRegs = 256;
-
-/// Value stack depth.  Expression trees are lowered one operand at a time and
-/// the deepest transient use is one slot per PHI node in a successor block, so
-/// this is generous.
-static constexpr unsigned kStackSize = 128;
-
-/// Bytes of per-call scratch memory backing the function's `alloca`s.
-/// Addresses handed out by OP_PUSH_FRAME point into it.  The arena is 16-byte
-/// aligned, so an alloca demanding more alignment than that is not virtualised.
-///
-/// Together with the register and stack arrays this makes one VM frame a few
-/// kilobytes: a virtualised recursive function is far hungrier for native stack
-/// than its original, which bounds how deep it can safely go.
-static constexpr unsigned kFrameSize = 1024;
-
-/// Maximum arguments in an OP_CALL.  The interpreter dispatches through a
-/// fixed set of prototypes, one per arity.
-static constexpr unsigned kMaxCallArgs = 8;
+// ── Encoding limits ─────────────────────────────────────────────────────────
+//
+// These bound what the *pass* may emit and have no counterpart in the
+// interpreter, so they are not part of the shared table.
 
 /// Maximum bytecode size per function; the size is passed to the interpreter
 /// as a uint32_t.

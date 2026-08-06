@@ -2,14 +2,26 @@
 
 ```
 kagura/
-├── include/kagura/         Public headers (Passes.h, Options.h, Utils.h, game_protect.h)
+├── include/kagura/
+│   ├── PassRegistry.def    The pass list. Generates the flags, the pipeline,
+│   │                       the JSON policy keys and the link smoke tests
+│   ├── Passes/             One header per lib/Transforms/ subdirectory
+│   ├── Passes.h            Umbrella over Passes/; for Plugin.cpp and the fuzzers
+│   ├── Options.h           CLI flag declarations (generated from the registry)
+│   ├── Utils.h             Shared IR helpers, PRNG, target-triple predicates
+│   ├── VM.h + VMOpcodes.def  The bytecode contract, shared with the C runtime
+│   └── game_protect.h      Protected<T> — the one consumer-facing header
 ├── lib/Transforms/
+│   ├── ABI/                C++ RTTI names and vtable integrity
+│   ├── AntiAnalysis/       Anti-debug, integrity, call indirection, honey values
 │   ├── CFG/                Control-flow obfuscation passes
 │   ├── Data/               String / constant / global / wide-string / memory-value encryption
-│   ├── AntiAnalysis/       Anti-debug, integrity, call indirection, honey values
-│   ├── Platform/           iOS (ObjC), Android (JNI), VM virtualization
-│   ├── Infrastructure/     DWARF control, config DSL, symbol map
-│   ├── Options.cpp         Centralized CLI flag definitions
+│   ├── Infrastructure/     Policy, metrics, symbol map, audit log
+│   ├── Platform/           iOS (ObjC), Android (JNI)
+│   ├── VM/                 Function virtualization
+│   ├── Support/            Private headers shared between passes (AES128.h)
+│   ├── Profiles.def        FAST / BALANCED / STRONG. Generates integration/profiles/*.json
+│   ├── Options.cpp         CLI flag definitions
 │   ├── Plugin.cpp          Pass registration & pipeline wiring
 │   └── Utils.cpp           Shared IR helpers & PRNG
 ├── runtime/
@@ -20,7 +32,10 @@ kagura/
 │   ├── windows/            Windows: IsDebuggerPresent, NtQueryInformationProcess, PE integrity
 │   └── game/               Anti-cheat, IL2CPP protection, telemetry
 ├── integration/            Xcode, Gradle, Unity, Unreal, CMake, Bazel, CocoaPods, SPM
-├── scripts/                CLI tools, verification, differential testing, review risk assessment
+├── scripts/
+│   ├── cli/                Tools you run on your own build (config, strip, diff, variants)
+│   ├── eval/               Cost model, battery estimate, benchmarks
+│   └── ci/                 Differential test, reproducible-build check, profile generator
 └── tests/                  CTest + FileCheck lit-based regression tests
 ```
 
@@ -37,10 +52,12 @@ Manager** via `PassPluginLibraryInfo`. It does two things:
 
 ## Configuration & options
 
-Per-pass enable flags are generated from `PassRegistry.def`, so they cannot
-drift from the pass list; `Options.cpp` defines the tuning parameters and the
-infrastructure flags by hand. Adding a tunable means adding a `cl::opt<...>`
-there, then reading it from the pass.
+Per-pass enable flags and numeric tuning parameters are generated from
+`PassRegistry.def` — both the definitions in `Options.cpp` and the extern
+declarations in `Options.h` — so neither can drift from the pass list. Adding a
+tunable means adding a `KAGURA_TUNING` row, then reading the flag from the pass.
+Only the string-valued and pipeline-control flags, which have no per-pass row,
+are written by hand.
 
 The [`kagura-config`](configuration.md) loader is **not** a pass. It is called
 from `Plugin.cpp` before the pipeline is constructed, because the `opt::`

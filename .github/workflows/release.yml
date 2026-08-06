@@ -107,7 +107,9 @@ jobs:
       # Bundle layout per platform+llvm:
       #   kagura-<version>-<os-label>-llvm<llvm>.tar.gz
       #     ├── lib/            KaguraObfuscator.{dylib,so}, libkagura_runtime.a
-      #     ├── include/kagura/ *.h
+      #     ├── include/kagura/ game_protect.h, VM.h + VMOpcodes.def
+      #                         (the pass-plugin headers need LLVM and are not
+      #                          part of the consumer interface)
       #     ├── bin/            kagura-opt (when built)
       #     └── share/kagura/   profiles/*.json
       #

@@ -41,7 +41,7 @@
 #define DEBUG_TYPE "kagura-pac"
 
 #include "kagura/Options.h"
-#include "kagura/Passes.h"
+#include "kagura/Passes/AntiAnalysis.h"
 #include "kagura/Utils.h"
 
 #include "llvm/IR/Attributes.h"

@@ -25,7 +25,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "kagura/Options.h"
-#include "kagura/Passes.h"
+#include "kagura/Passes/CFG.h"
 #include "kagura/Utils.h"
 
 #include "llvm/IR/Attributes.h"
@@ -155,7 +155,7 @@ static CallInst *indirectifyCall(CallInst &CI, Function &ParentFn, PRNG &RNG) {
 
 // ---- Main per-function worker ----
 
-static bool obfuscateFunction(Function &F, PRNG &RNG) {
+static bool indirectifyCalls(Function &F, PRNG &RNG) {
   if (F.isDeclaration())
     return false;
 
@@ -191,7 +191,7 @@ PreservedAnalyses IndirectBranchPass::run(Function &F,
     return PreservedAnalyses::all();
 
   auto &RNG    = getModulePRNG();
-  bool Changed = obfuscateFunction(F, RNG);
+  bool Changed = indirectifyCalls(F, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 

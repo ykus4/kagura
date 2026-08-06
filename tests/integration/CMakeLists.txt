@@ -50,6 +50,7 @@ macro(kagura_add_integration_test TEST_NAME PASSES SOURCE_FILE EXPECTED_OUTPUT)
       -DTEST_NAME=${TEST_NAME}
       -DREQUIRE_IR=${_require_ir}
       -DRUNTIME=${_runtime}
+      -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/artifacts
       -P ${CMAKE_CURRENT_SOURCE_DIR}/run_integration_test.cmake
   )
   set_tests_properties(integration_${TEST_NAME} PROPERTIES

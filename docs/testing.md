@@ -15,7 +15,7 @@ matrix.
 Verify that a fixed seed produces byte-identical IR across two builds:
 
 ```bash
-./scripts/verify-reproducible.sh
+./scripts/ci/verify-reproducible.sh
 # [kagura-repro] PASS: Both builds produced identical IR.
 ```
 
@@ -24,7 +24,7 @@ Verify that a fixed seed produces byte-identical IR across two builds:
 Verify that obfuscated binaries produce the same output as plain binaries:
 
 ```bash
-./scripts/differential-test.sh
+./scripts/ci/differential-test.sh
 # [diff-test] arithmetic_test ... PASS
 # [diff-test] combined_test   ... PASS
 # Results: 8 passed, 0 failed, 0 skipped
@@ -36,7 +36,7 @@ Scan a compiled binary for patterns that may trigger store-review rejection
 (non-PIE, plaintext API keys, debug symbols leaking selectors, …):
 
 ```bash
-./scripts/review-risk-assessment.sh path/to/MyApp.dylib --platform ios
+./scripts/cli/review-risk-assessment.sh path/to/MyApp.dylib --platform ios
 # [HIGH    ] [SEC-PIE] ...
 # [INFO    ] [ENC-DECL] No obvious encryption keyword references found.
 # RESULT: No critical or high review risks detected.
@@ -73,13 +73,13 @@ Each subdirectory has its own README — see
 
 | Script | Purpose |
 |:-------|:--------|
-| `scripts/kagura-cli.py` | Config generator, audit log viewer, symbol map analyzer |
-| `scripts/kagura-diff.py` | Section / symbol / string diff between baseline and obfuscated binary (text or HTML report) |
-| `scripts/kagura-strip.py` | Post-build hygiene — zero out `LC_UUID` (Mach-O) / `.note.gnu.build-id` (ELF) so binaries don't leak rebuild fingerprints |
-| `scripts/variant_generator.py` | Per-customer / per-app variant generation with custom keys |
-| `scripts/attacker_cost_model.py` | Estimate attacker reverse-engineering cost (analyst-hours) |
-| `scripts/battery_impact.py` | Model battery / CPU impact of runtime passes |
-| `scripts/license_manager.py` | Generate, validate, and revoke time-limited license tokens |
+| `scripts/cli/kagura-cli.py` | Config generator, audit log viewer, symbol map analyzer |
+| `scripts/cli/kagura-diff.py` | Section / symbol / string diff between baseline and obfuscated binary (text or HTML report) |
+| `scripts/cli/kagura-strip.py` | Post-build hygiene — zero out `LC_UUID` (Mach-O) / `.note.gnu.build-id` (ELF) so binaries don't leak rebuild fingerprints |
+| `scripts/cli/variant_generator.py` | Per-customer / per-app variant generation with custom keys |
+| `scripts/eval/attacker_cost_model.py` | Estimate attacker reverse-engineering cost (analyst-hours) |
+| `scripts/eval/battery_impact.py` | Model battery / CPU impact of runtime passes |
+| `scripts/cli/license_manager.py` | Generate, validate, and revoke time-limited license tokens |
 
 ### `kagura-diff` — what passes actually changed
 
@@ -88,8 +88,8 @@ symbol counts, and string-count delta. Useful for validating that a release
 build really did strip plaintext API keys, hide non-public symbols, etc.
 
 ```bash
-scripts/kagura-diff.py baseline.dylib obfuscated.dylib
-scripts/kagura-diff.py baseline.dylib obfuscated.dylib --html report.html
+scripts/cli/kagura-diff.py baseline.dylib obfuscated.dylib
+scripts/cli/kagura-diff.py baseline.dylib obfuscated.dylib --html report.html
 ```
 
 ### `kagura-strip` — scrub residual build metadata
@@ -101,9 +101,9 @@ after `strip` to remove those:
 ```bash
 # macOS / iOS
 strip MyApp.dylib                       # remove debug symbols first
-scripts/kagura-strip.py MyApp.dylib     # zero out LC_UUID
+scripts/cli/kagura-strip.py MyApp.dylib     # zero out LC_UUID
 
 # Linux / Android
 llvm-strip MyApp.so
-scripts/kagura-strip.py MyApp.so        # remove .note.gnu.build-id + .comment
+scripts/cli/kagura-strip.py MyApp.so        # remove .note.gnu.build-id + .comment
 ```

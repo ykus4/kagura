@@ -6,7 +6,7 @@
 # with severity levels: CRITICAL / HIGH / MEDIUM / LOW / INFO.
 #
 # Usage:
-#   ./scripts/review-risk-assessment.sh <binary_path> [--platform ios|android|auto]
+#   ./scripts/cli/review-risk-assessment.sh <binary_path> [--platform ios|android|auto]
 #
 # Outputs:
 #   A human-readable risk report on stdout.

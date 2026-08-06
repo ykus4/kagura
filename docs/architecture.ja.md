@@ -2,14 +2,26 @@
 
 ```
 kagura/
-├── include/kagura/         パブリックヘッダ (Passes.h, Options.h, Utils.h, game_protect.h)
+├── include/kagura/
+│   ├── PassRegistry.def    パス一覧。フラグ・パイプライン・JSON ポリシーキー・
+│   │                       リンクスモークテストをここから生成する
+│   ├── Passes/             lib/Transforms/ のサブディレクトリごとに 1 ヘッダ
+│   ├── Passes.h            Passes/ のアンブレラ。Plugin.cpp と fuzzer 用
+│   ├── Options.h           CLI フラグ宣言 (レジストリから生成)
+│   ├── Utils.h             共通 IR ヘルパー, PRNG, ターゲット判定
+│   ├── VM.h + VMOpcodes.def  バイトコード契約。C ランタイムと共有
+│   └── game_protect.h      Protected<T> — 唯一の利用者向け公開ヘッダ
 ├── lib/Transforms/
+│   ├── ABI/                C++ RTTI 名と vtable 整合性
+│   ├── AntiAnalysis/       アンチデバッグ, 整合性, 呼び出し間接化, ハニー値
 │   ├── CFG/                制御フロー難読化パス
 │   ├── Data/               文字列 / 定数 / グローバル / ワイド文字列 / メモリ値暗号化
-│   ├── AntiAnalysis/       アンチデバッグ, 整合性, 呼び出し間接化, ハニー値
-│   ├── Platform/           iOS (ObjC), Android (JNI), VM 仮想化
-│   ├── Infrastructure/     DWARF 制御, 設定 DSL, シンボルマップ
-│   ├── Options.cpp         CLI フラグの集中定義
+│   ├── Infrastructure/     ポリシー, メトリクス, シンボルマップ, 監査ログ
+│   ├── Platform/           iOS (ObjC), Android (JNI)
+│   ├── VM/                 関数仮想化
+│   ├── Support/            パス間で共有する非公開ヘッダ (AES128.h)
+│   ├── Profiles.def        FAST / BALANCED / STRONG。integration/profiles/*.json を生成
+│   ├── Options.cpp         CLI フラグ定義
 │   ├── Plugin.cpp          パス登録 & パイプライン接続
 │   └── Utils.cpp           共通 IR ヘルパー & PRNG
 ├── runtime/
@@ -20,7 +32,10 @@ kagura/
 │   ├── windows/            Windows: IsDebuggerPresent, NtQueryInformationProcess, PE 整合性
 │   └── game/               アンチチート, IL2CPP 保護, テレメトリ
 ├── integration/            Xcode, Gradle, Unity, Unreal, CMake, Bazel, CocoaPods, SPM
-├── scripts/                CLI ツール, 検証, 差分テスト, 審査リスク評価
+├── scripts/
+│   ├── cli/                自分のビルドに対して使うツール (設定, strip, diff, variant)
+│   ├── eval/               コストモデル, バッテリ推定, ベンチマーク
+│   └── ci/                 差分テスト, 再現ビルド検証, プロファイル生成
 └── tests/                  CTest + FileCheck lit ベース回帰テスト
 ```
 
@@ -33,6 +48,6 @@ kagura/
 
 ## 設定 & オプション
 
-パスごとの有効化フラグは `PassRegistry.def` から生成されるため、パス一覧とドリフトしません。`Options.cpp` はチューニングパラメータと基盤フラグを手書きで定義します。新しいチューナブルを追加するということは、ここに `cl::opt<...>` を追加し、パスから読み出すことを意味します。
+パスごとの有効化フラグと数値チューニングパラメータは `PassRegistry.def` から生成されます。`Options.cpp` の定義と `Options.h` の extern 宣言の両方が生成されるため、どちらもパス一覧とドリフトしません。新しいチューナブルを追加するには `KAGURA_TUNING` 行を足し、パスからフラグを読むだけです。パスごとの行を持たない文字列フラグとパイプライン制御フラグのみ手書きです。
 
 [`kagura-config`](configuration.md) ローダは **パスではありません**。`opt::` の値はパイプライン構築時に読まれてどのパスを追加するか決まるため、`Plugin.cpp` がパイプライン構築前に呼び出します。パイプライン内のパスとして動かしてもその判断には影響できません。

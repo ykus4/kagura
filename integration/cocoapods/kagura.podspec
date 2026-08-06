@@ -26,7 +26,10 @@ Pod::Spec.new do |s|
   # matching when the flat layout became runtime/{core,anti_debug,ios,android,
   # windows,game}/ — which pulled every Android and Windows source into the
   # iOS pod.
-  s.source_files = "runtime/**/*.{c,h}", "include/kagura/game_protect.h"
+  # VMOpcodes.def is the VM opcode table runtime/core/vm_interpreter.c shares
+  # with the pass; without it that file does not compile.
+  s.source_files = "runtime/**/*.{c,h}", "include/kagura/game_protect.h",
+                   "include/kagura/VMOpcodes.def"
   s.exclude_files = [
     "runtime/android/**/*",  # Bionic / Linux: JNI, SafetyNet, seccomp, APK
     "runtime/windows/**/*",  # Win32: ETW, PE integrity, Windows anti-debug

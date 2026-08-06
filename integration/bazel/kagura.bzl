@@ -73,7 +73,15 @@ def kagura_runtime_library(name = "kagura_runtime", visibility = None, **kwargs)
             "@platforms//os:tvos": apple_srcs,
             "//conditions:default": [],
         }),
-        hdrs = native.glob(["include/**/*.h"]),
+        # runtime/**/*.h is internal.h, which every runtime .c includes, and the
+        # .def is the VM opcode table core/vm_interpreter.c shares with the
+        # pass. Neither is part of the public interface, but both have to be
+        # visible to the compile action.
+        hdrs = native.glob([
+            "include/**/*.h",
+            "include/**/*.def",
+            "runtime/**/*.h",
+        ]),
         includes = ["include"],
         copts = ["-std=c11"],
         linkopts = select({

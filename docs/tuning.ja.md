@@ -48,4 +48,4 @@
 
 ## 再現性
 
-`-kagura-seed=<N>` をゼロでない値にすると、パイプライン全体が決定論的になります。`scripts/verify-reproducible.sh` と組み合わせて、2回のビルドが同じ IR を生成することを確認できます — [テスト・評価](testing.md) を参照。
+`-kagura-seed=<N>` をゼロでない値にすると、パイプライン全体が決定論的になります。`scripts/ci/verify-reproducible.sh` と組み合わせて、2回のビルドが同じ IR を生成することを確認できます — [テスト・評価](testing.md) を参照。

@@ -26,7 +26,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "kagura/Options.h"
-#include "kagura/Passes.h"
+#include "kagura/Passes/Data.h"
 #include "kagura/Utils.h"
 
 #include "llvm/IR/Function.h"
@@ -39,15 +39,6 @@ using namespace llvm;
 namespace kagura {
 
 // ---- Helpers ---------------------------------------------------------------
-
-static bool isSupportedWidth(unsigned Bits) {
-  return Bits == 8 || Bits == 16 || Bits == 32 || Bits == 64;
-}
-
-/// All-ones mask for an N-bit value, avoiding the UB of `1ULL << 64`.
-static uint64_t maskForWidth(unsigned Bits) {
-  return Bits >= 64 ? ~0ULL : ((1ULL << Bits) - 1);
-}
 
 /// Returns true if the alloca pointer escapes the function (address taken).
 /// We consider an address "escaped" if it is passed to a Call/Invoke, stored
@@ -109,7 +100,7 @@ PreservedAnalyses MemoryValueObfuscationPass::run(Function &F,
         Type *Ty = AI->getAllocatedType();
         if (!Ty->isIntegerTy())
           continue;
-        if (!isSupportedWidth(Ty->getIntegerBitWidth()))
+        if (!isSupportedIntWidth(Ty->getIntegerBitWidth()))
           continue;
         if (AI->isArrayAllocation())
           continue; // variable-length alloca — skip

@@ -18,7 +18,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "kagura/Passes.h"
+#include "kagura/Passes/AntiAnalysis.h"
 #include "kagura/Utils.h"
 
 #include "llvm/IR/Constants.h"

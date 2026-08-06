@@ -72,7 +72,7 @@ def main():
 
     # 2. Attacker cost model
     print("[2/3] Running attacker cost model...")
-    cost_script = os.path.join(ROOT_DIR, "scripts/attacker_cost_model.py")
+    cost_script = os.path.join(ROOT_DIR, "scripts/eval/attacker_cost_model.py")
     if os.path.exists(cost_script):
         ev = run_script(cost_script, [
             "--binary", args.binary,

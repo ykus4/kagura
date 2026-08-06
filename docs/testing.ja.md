@@ -13,7 +13,7 @@ Lit ベースの FileCheck テストは `tests/` 配下にあります。テス�
 固定シードでビルドした2回の出力がバイト単位で同一であることを検証:
 
 ```bash
-./scripts/verify-reproducible.sh
+./scripts/ci/verify-reproducible.sh
 # [kagura-repro] PASS: Both builds produced identical IR.
 ```
 
@@ -22,7 +22,7 @@ Lit ベースの FileCheck テストは `tests/` 配下にあります。テス�
 難読化バイナリが平文バイナリと同じ出力を生成することを検証:
 
 ```bash
-./scripts/differential-test.sh
+./scripts/ci/differential-test.sh
 # [diff-test] arithmetic_test ... PASS
 # [diff-test] combined_test   ... PASS
 # Results: 8 passed, 0 failed, 0 skipped
@@ -33,7 +33,7 @@ Lit ベースの FileCheck テストは `tests/` 配下にあります。テス�
 コンパイル済みバイナリをスキャンし、ストア審査拒絶を招くパターンを検出 (非 PIE, 平文 API キー, セレクタを漏らすデバッグシンボル等):
 
 ```bash
-./scripts/review-risk-assessment.sh path/to/MyApp.dylib --platform ios
+./scripts/cli/review-risk-assessment.sh path/to/MyApp.dylib --platform ios
 # [HIGH    ] [SEC-PIE] ...
 # [INFO    ] [ENC-DECL] No obvious encryption keyword references found.
 # RESULT: No critical or high review risks detected.
@@ -70,21 +70,21 @@ cd tests/redteam && python3 run_redteam.py \
 
 | スクリプト | 目的 |
 |:-----------|:-----|
-| `scripts/kagura-cli.py` | 設定ジェネレータ、監査ログビューア、シンボルマップアナライザ |
-| `scripts/kagura-diff.py` | ベースラインと難読化バイナリのセクション / シンボル / 文字列差分 (text or HTML) |
-| `scripts/kagura-strip.py` | ビルド後の衛生処理 — `LC_UUID` (Mach-O) / `.note.gnu.build-id` (ELF) をゼロ化してリビルド指紋を消す |
-| `scripts/variant_generator.py` | カスタム鍵を使った顧客 / アプリごとのバリアント生成 |
-| `scripts/attacker_cost_model.py` | 攻撃者のリバースエンジニアリングコスト (アナリスト時間) を推定 |
-| `scripts/battery_impact.py` | ランタイムパスのバッテリー / CPU 影響をモデル化 |
-| `scripts/license_manager.py` | 期限付きライセンストークンの生成、検証、失効 |
+| `scripts/cli/kagura-cli.py` | 設定ジェネレータ、監査ログビューア、シンボルマップアナライザ |
+| `scripts/cli/kagura-diff.py` | ベースラインと難読化バイナリのセクション / シンボル / 文字列差分 (text or HTML) |
+| `scripts/cli/kagura-strip.py` | ビルド後の衛生処理 — `LC_UUID` (Mach-O) / `.note.gnu.build-id` (ELF) をゼロ化してリビルド指紋を消す |
+| `scripts/cli/variant_generator.py` | カスタム鍵を使った顧客 / アプリごとのバリアント生成 |
+| `scripts/eval/attacker_cost_model.py` | 攻撃者のリバースエンジニアリングコスト (アナリスト時間) を推定 |
+| `scripts/eval/battery_impact.py` | ランタイムパスのバッテリー / CPU 影響をモデル化 |
+| `scripts/cli/license_manager.py` | 期限付きライセンストークンの生成、検証、失効 |
 
 ### `kagura-diff` — 実際にパスが何を変えたか
 
 ベースラインバイナリと難読化済みバイナリを比較し、セクション増加・シンボル数・文字列数の差分を表示します。リリースビルドが本当に平文 API キーを除去し、非公開シンボルを隠したかを検証するのに便利です。
 
 ```bash
-scripts/kagura-diff.py baseline.dylib obfuscated.dylib
-scripts/kagura-diff.py baseline.dylib obfuscated.dylib --html report.html
+scripts/cli/kagura-diff.py baseline.dylib obfuscated.dylib
+scripts/cli/kagura-diff.py baseline.dylib obfuscated.dylib --html report.html
 ```
 
 ### `kagura-strip` — 残存ビルドメタデータを消去
@@ -94,9 +94,9 @@ IR レベルのパスはリンカが後で書き込むメタデータ (`LC_UUID`
 ```bash
 # macOS / iOS
 strip MyApp.dylib                       # まずデバッグシンボルを除去
-scripts/kagura-strip.py MyApp.dylib     # LC_UUID をゼロ化
+scripts/cli/kagura-strip.py MyApp.dylib     # LC_UUID をゼロ化
 
 # Linux / Android
 llvm-strip MyApp.so
-scripts/kagura-strip.py MyApp.so        # .note.gnu.build-id + .comment を削除
+scripts/cli/kagura-strip.py MyApp.so        # .note.gnu.build-id + .comment を削除
 ```

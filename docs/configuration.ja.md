@@ -39,11 +39,15 @@ Kagura は `-kagura-config=<path>` で JSON ポリシーファイルを受け取
 
 | プロファイル | パス | 用途 |
 |:-------------|:-----|:-----|
-| `FAST`     | STR のみ | デバッグ / CI ビルド、最小オーバーヘッド |
-| `BALANCED` | `str` `wstr` `bcf` `bbr` `bbs` `dci` `genc` `mvo`（`bcf_prob` 20, `bcf_iter` 1） | 標準リリースビルド |
-| `STRONG`   | `str` `str-aes` `wstr` `fla` `bcf` `sub` `co` `ibr` `lt` `bbr` `bbs` `dci` `genc` `mvo` `sv` `honey`（`bcf_prob` 50, `bcf_iter` 2, `sub_iter` 2） | セキュリティクリティカルな出荷ビルド |
+| `FAST`     | `str` `sv` `anti-debug` | デバッグ / CI ビルド、最小オーバーヘッド |
+| `BALANCED` | `str` `wstr` `bcf` `bbr` `bbs` `dci` `genc` `mvo` `sv` `anti-debug` `tamper`（`bcf_prob` 20, `bcf_iter` 1） | 標準リリースビルド |
+| `STRONG`   | `str` `str-aes` `wstr` `fla` `bcf` `sub` `co` `ibr` `lt` `bbr` `bbs` `dci` `genc` `mvo` `sv` `honey` `anti-debug` `tamper`（`bcf_prob` 50, `bcf_iter` 2, `sub_iter` 2） | セキュリティクリティカルな出荷ビルド |
 
-`STRONG` は「全パス」ではありません。`kagura_runtime` のリンクを必要とするもの、ABI を変えるもの、コストが大きすぎるものは意図的に除外しています: `anti-debug`, `tamper`, `ci`, `pac`, `vm`, `fsplit`, `pe`, `elt`, `vtp`, `bbcheck`, `telemetry`, `string-split`。必要な場合は `passes` オブジェクトで明示的に有効化してください。
+どのプロファイルも `anti-debug` を有効にするため、**プロファイルを使うビルドは `kagura_runtime` のリンクが必須**です。
+
+`STRONG` は「全パス」ではありません。ABI を変えるもの、特定ターゲットを要するもの、コストが大きすぎるものは意図的に除外しています: `ci`, `pac`, `vm`, `fsplit`, `pe`, `elt`, `vtp`, `bbcheck`, `telemetry`, `cse-break`, `string-split`。必要な場合は `passes` オブジェクトで明示的に有効化してください。
+
+[`integration/profiles/`](https://github.com/ykus4/kagura/tree/main/integration/profiles) の JSON はこの表とまったく同じ内容です。どちらも `lib/Transforms/Profiles.def` から生成されるため、プロファイル名の意味は選び方によらず一致します。（以前は一致していませんでした: JSON 側だけが `sv` `anti-debug` `tamper` を有効にしていました。）
 
 プロファイルはデフォルトを設定するだけ。`"passes"` や `"tuning"` で個別キーをオーバーライドできます。
 

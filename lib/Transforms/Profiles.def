@@ -1,0 +1,137 @@
+//===-- Profiles.def - Single source of truth for the strength profiles ---===//
+//
+// X-macro table. One row per (profile, setting) pair.
+//
+//   KAGURA_PROFILE_PASS(Profile, Flag, Value)
+//       Enable (true) or disable (false) a pass for that profile. Flag names a
+//       kagura::opt bool from kagura/PassRegistry.def.
+//
+//   KAGURA_PROFILE_TUNING(Profile, Flag, Value)
+//       Set a numeric tuning parameter. Flag names a KAGURA_TUNING row.
+//
+// Profile is the bare profile name, compared case-insensitively against the
+// "profile" key of a JSON policy file.
+//
+// Consumed by:
+//   lib/Transforms/Infrastructure/ConfigLoader.cpp   -> applyProfile()
+//   scripts/ci/gen-profiles.py                      -> integration/profiles/*.json
+//
+// The profile → pass-set mapping used to exist in four places that had already
+// diverged: applyProfile() in ConfigLoader.cpp, integration/profiles/*.json
+// (which the CMake, Xcode and Unity integrations parse at build time), the
+// table in docs/configuration.md, and the prose in
+// integration/profiles/README.md. The JSON enabled sv / anti_debug / tamper
+// and the C++ preset did not, so `{"profile": "BALANCED"}` in a hand-written
+// policy file produced a materially weaker binary than the shipped
+// balanced.json that claimed to be the same profile. The JSON files are now
+// generated from this table and CI fails if they are out of date.
+//
+// Explicit `false` rows are not redundant with the flag defaults: they record
+// that a profile deliberately leaves a pass off, and they are what makes the
+// generated JSON self-documenting.
+//
+// Passes with no row in any profile — ci, pac, elt, bbcheck, telemetry,
+// string_split, cse_break, objc, jni — are opt-in only. objc and jni are
+// added by the Apple and Android integrations because they are platform-gated;
+// the rest change the ABI, need a specific target, or cost more than a
+// general-purpose profile should spend.
+//
+// All three profiles enable anti_debug (and BALANCED/STRONG also tamper), so
+// every profile requires the target to link kagura_runtime.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef KAGURA_PROFILE_PASS
+#define KAGURA_PROFILE_PASS(Profile, Flag, Value)
+#endif
+
+#ifndef KAGURA_PROFILE_TUNING
+#define KAGURA_PROFILE_TUNING(Profile, Flag, Value)
+#endif
+
+// ---- FAST — debug / CI builds; bounded, predictable overhead ---------------
+KAGURA_PROFILE_PASS(FAST, STR,       true)
+KAGURA_PROFILE_PASS(FAST, SV,        true)
+KAGURA_PROFILE_PASS(FAST, AntiDebug, true)
+KAGURA_PROFILE_PASS(FAST, STRAES,    false)
+KAGURA_PROFILE_PASS(FAST, WSTR,      false)
+KAGURA_PROFILE_PASS(FAST, FLA,       false)
+KAGURA_PROFILE_PASS(FAST, BCF,       false)
+KAGURA_PROFILE_PASS(FAST, SUB,       false)
+KAGURA_PROFILE_PASS(FAST, CO,        false)
+KAGURA_PROFILE_PASS(FAST, IBR,       false)
+KAGURA_PROFILE_PASS(FAST, LT,        false)
+KAGURA_PROFILE_PASS(FAST, BBR,       false)
+KAGURA_PROFILE_PASS(FAST, BBS,       false)
+KAGURA_PROFILE_PASS(FAST, DCI,       false)
+KAGURA_PROFILE_PASS(FAST, GENC,      false)
+KAGURA_PROFILE_PASS(FAST, MVO,       false)
+KAGURA_PROFILE_PASS(FAST, Honey,     false)
+KAGURA_PROFILE_PASS(FAST, Tamper,    false)
+KAGURA_PROFILE_PASS(FAST, FSplit,    false)
+KAGURA_PROFILE_PASS(FAST, PE,        false)
+KAGURA_PROFILE_PASS(FAST, VM,        false)
+KAGURA_PROFILE_TUNING(FAST, BCFProb, 30)
+KAGURA_PROFILE_TUNING(FAST, BCFIter, 1)
+KAGURA_PROFILE_TUNING(FAST, SUBIter, 1)
+KAGURA_PROFILE_TUNING(FAST, DCIProb, 40)
+
+// ---- BALANCED — the default for release builds -----------------------------
+KAGURA_PROFILE_PASS(BALANCED, STR,       true)
+KAGURA_PROFILE_PASS(BALANCED, WSTR,      true)
+KAGURA_PROFILE_PASS(BALANCED, BCF,       true)
+KAGURA_PROFILE_PASS(BALANCED, BBR,       true)
+KAGURA_PROFILE_PASS(BALANCED, BBS,       true)
+KAGURA_PROFILE_PASS(BALANCED, DCI,       true)
+KAGURA_PROFILE_PASS(BALANCED, GENC,      true)
+KAGURA_PROFILE_PASS(BALANCED, MVO,       true)
+KAGURA_PROFILE_PASS(BALANCED, SV,        true)
+KAGURA_PROFILE_PASS(BALANCED, AntiDebug, true)
+KAGURA_PROFILE_PASS(BALANCED, Tamper,    true)
+KAGURA_PROFILE_PASS(BALANCED, STRAES,    false)
+KAGURA_PROFILE_PASS(BALANCED, FLA,       false)
+KAGURA_PROFILE_PASS(BALANCED, SUB,       false)
+KAGURA_PROFILE_PASS(BALANCED, CO,        false)
+KAGURA_PROFILE_PASS(BALANCED, IBR,       false)
+KAGURA_PROFILE_PASS(BALANCED, LT,        false)
+KAGURA_PROFILE_PASS(BALANCED, Honey,     false)
+KAGURA_PROFILE_PASS(BALANCED, FSplit,    false)
+KAGURA_PROFILE_PASS(BALANCED, PE,        false)
+KAGURA_PROFILE_PASS(BALANCED, VM,        false)
+KAGURA_PROFILE_TUNING(BALANCED, BCFProb, 20)
+KAGURA_PROFILE_TUNING(BALANCED, BCFIter, 1)
+KAGURA_PROFILE_TUNING(BALANCED, SUBIter, 1)
+KAGURA_PROFILE_TUNING(BALANCED, DCIProb, 40)
+
+// ---- STRONG — security-critical shipping builds ----------------------------
+//
+// Not "every pass": fsplit interacts badly with LTO, pe is ABI-sensitive and
+// vm costs 10-100x on the virtualized function. Those stay opt-in.
+KAGURA_PROFILE_PASS(STRONG, STR,       true)
+KAGURA_PROFILE_PASS(STRONG, STRAES,    true)
+KAGURA_PROFILE_PASS(STRONG, WSTR,      true)
+KAGURA_PROFILE_PASS(STRONG, FLA,       true)
+KAGURA_PROFILE_PASS(STRONG, BCF,       true)
+KAGURA_PROFILE_PASS(STRONG, SUB,       true)
+KAGURA_PROFILE_PASS(STRONG, CO,        true)
+KAGURA_PROFILE_PASS(STRONG, IBR,       true)
+KAGURA_PROFILE_PASS(STRONG, LT,        true)
+KAGURA_PROFILE_PASS(STRONG, BBR,       true)
+KAGURA_PROFILE_PASS(STRONG, BBS,       true)
+KAGURA_PROFILE_PASS(STRONG, DCI,       true)
+KAGURA_PROFILE_PASS(STRONG, GENC,      true)
+KAGURA_PROFILE_PASS(STRONG, MVO,       true)
+KAGURA_PROFILE_PASS(STRONG, SV,        true)
+KAGURA_PROFILE_PASS(STRONG, Honey,     true)
+KAGURA_PROFILE_PASS(STRONG, AntiDebug, true)
+KAGURA_PROFILE_PASS(STRONG, Tamper,    true)
+KAGURA_PROFILE_PASS(STRONG, FSplit,    false)
+KAGURA_PROFILE_PASS(STRONG, PE,        false)
+KAGURA_PROFILE_PASS(STRONG, VM,        false)
+KAGURA_PROFILE_TUNING(STRONG, BCFProb, 50)
+KAGURA_PROFILE_TUNING(STRONG, BCFIter, 2)
+KAGURA_PROFILE_TUNING(STRONG, SUBIter, 2)
+KAGURA_PROFILE_TUNING(STRONG, DCIProb, 40)
+
+#undef KAGURA_PROFILE_PASS
+#undef KAGURA_PROFILE_TUNING

@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  # ---- Generated files ----------------------------------------------------
+  # integration/profiles/*.json is generated from lib/Transforms/Profiles.def,
+  # the same table ConfigLoader.cpp compiles the presets from. Editing one and
+  # not the other is exactly how the JSON came to enable sv / anti_debug /
+  # tamper while the compiled preset did not, so a hand-written
+  # `{"profile": "BALANCED"}` shipped a weaker binary than balanced.json.
+  #
+  # Needs no LLVM, so it runs first and fails fast.
+  generated:
+    name: Generated files are up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check integration/profiles/*.json
+        run: python3 scripts/ci/gen-profiles.py --check
+
   # ---- Assertions build ---------------------------------------------------
   # Every other job builds Release, which defines NDEBUG and compiles assert()
   # out. Three real bugs lived behind those assertions: two APInt width
@@ -117,6 +133,18 @@ jobs:
 
       - name: Test
         run: cd build && ctest --output-on-failure -j$(sysctl -n hw.logicalcpu)
+
+      # Every ctest above stops at the IR or link level. These two run the
+      # obfuscated code. CONTRIBUTING.md has always told contributors to run
+      # differential-test.sh, but it was never in CI, and on macOS it could not
+      # work at all: it shelled out to timeout(1), which does not exist there,
+      # and only gated its exit status on failures — so it reported success for
+      # every subject while comparing none of them.
+      - name: Differential test (obfuscated output matches plain)
+        run: ./scripts/ci/differential-test.sh
+
+      - name: Reproducible build (same seed, identical IR)
+        run: ./scripts/ci/verify-reproducible.sh
 
   # ---- A.1: Windows / MSVC build (Clang-CL) --------------------------------
   # Neither choco nor the pre-installed LLVM on windows-latest ships
@@ -551,14 +579,14 @@ jobs:
       - name: Estimate battery impact from pass list
         run: |
           # Model-based estimate; no binary needed in CI
-          python3 scripts/battery_impact.py \
+          python3 scripts/eval/battery_impact.py \
             --passes str,bbcheck,anti-debug,co,pe \
             --calls-per-sec 200 \
             --duration 60
 
       - name: Estimate battery impact (all runtime passes)
         run: |
-          python3 scripts/battery_impact.py \
+          python3 scripts/eval/battery_impact.py \
             --passes str,str-aes,wstr,co,bbcheck,anti-debug,pac,pe,telemetry,vm,elt,vtp,ci \
             --calls-per-sec 500 \
             --duration 60

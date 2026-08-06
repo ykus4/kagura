@@ -30,11 +30,23 @@ function(kagura_add_install_rules)
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
   endif()
 
-  # Public headers: Protected<T> and the runtime ABI are part of the shipped
-  # interface, so consumers need them.
-  install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/kagura
-          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-          FILES_MATCHING PATTERN "*.h")
+  # Public headers, listed rather than globbed.
+  #
+  # `FILES_MATCHING PATTERN "*.h"` over the whole directory shipped the LLVM
+  # pass-plugin headers — Options.h, Passes/, Utils.h — to consumers who have
+  # no LLVM to include, and it stopped even being self-consistent once those
+  # headers started expanding a .def: the pattern excluded PassRegistry.def and
+  # VMOpcodes.def, so the installed Options.h could not be included at all.
+  #
+  # game_protect.h is the consumer-facing interface (the Protected<T>
+  # template). VM.h plus the .def it expands are the bytecode contract, which a
+  # consumer building the runtime from source needs. The podspec and Package.swift
+  # already draw the line in this same place.
+  install(FILES
+            ${PROJECT_SOURCE_DIR}/include/kagura/game_protect.h
+            ${PROJECT_SOURCE_DIR}/include/kagura/VM.h
+            ${PROJECT_SOURCE_DIR}/include/kagura/VMOpcodes.def
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/kagura)
 
   # The JSON policy profiles the integrations reference by path.
   if(EXISTS ${PROJECT_SOURCE_DIR}/integration/profiles)
