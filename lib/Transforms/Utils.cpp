@@ -81,6 +81,20 @@ bool isKaguraSymbol(StringRef Name) {
   return false;
 }
 
+// ---- Integer width helpers ------------------------------------------------
+
+uint64_t maskForWidth(unsigned Bits) {
+  return Bits >= 64 ? ~0ULL : ((1ULL << Bits) - 1);
+}
+
+bool isSupportedIntWidth(unsigned Bits) {
+  return Bits == 8 || Bits == 16 || Bits == 32 || Bits == 64;
+}
+
+bool isSupportedIntType(const Type *Ty) {
+  return Ty->isIntegerTy() && isSupportedIntWidth(Ty->getIntegerBitWidth());
+}
+
 // ---- Hashing --------------------------------------------------------------
 
 // FNV-1a parameters. Mirrored in runtime/core/hash.c — the runtime recomputes

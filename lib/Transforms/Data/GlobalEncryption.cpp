@@ -43,29 +43,12 @@ static bool shouldSkipGlobal(const GlobalVariable &GV) {
   return false;
 }
 
-/// All-ones mask for an N-bit value, avoiding the UB of `1ULL << 64`.
-///
-/// Keys must be masked to the value's width before reaching APInt: the
-/// APInt(BitWidth, uint64_t) constructor asserts the value already fits, so an
-/// unmasked 32-bit draw crashes an assertions-enabled build on an i8/i16 global.
-static uint64_t maskForWidth(unsigned Bits) {
-  return Bits >= 64 ? ~0ULL : ((1ULL << Bits) - 1);
-}
-
-/// Return true if Ty is an integer type that we handle (i8/i16/i32/i64).
-static bool isSupportedIntTy(Type *Ty) {
-  if (!Ty->isIntegerTy())
-    return false;
-  unsigned Bits = Ty->getIntegerBitWidth();
-  return Bits == 8 || Bits == 16 || Bits == 32 || Bits == 64;
-}
-
 /// Return true if Ty is [N x iW] where iW is a supported integer width.
 static bool isSupportedIntArrayTy(Type *Ty) {
   auto *AT = dyn_cast<ArrayType>(Ty);
   if (!AT)
     return false;
-  return isSupportedIntTy(AT->getElementType());
+  return isSupportedIntType(AT->getElementType());
 }
 
 /// Return true if the initializer is a ConstantDataArray of strings.
@@ -118,7 +101,7 @@ static std::vector<EligibleGlobal> collectEligibleGlobals(Module &M) {
 
     Type *ValTy = GV.getValueType();
 
-    if (isSupportedIntTy(ValTy)) {
+    if (isSupportedIntType(ValTy)) {
       // Scalar integer constant: initializer must be ConstantInt.
       if (!isa<ConstantInt>(GV.getInitializer()))
         continue;

@@ -51,6 +51,23 @@ bool shouldObfuscate(llvm::Function &F, llvm::StringRef PassAttr,
 /// by later passes. This recognises every prefix kagura actually emits.
 bool isKaguraSymbol(llvm::StringRef Name);
 
+// ---- Integer width helpers ----
+
+/// All-ones mask for an N-bit value, avoiding the UB of `1ULL << 64`.
+///
+/// Every XOR-encryption pass needs this: keys must be masked to the value's
+/// width before reaching APInt, because the APInt(BitWidth, uint64_t)
+/// constructor asserts the value already fits, so an unmasked 32-bit draw
+/// crashes an assertions-enabled build on an i8/i16 value.
+uint64_t maskForWidth(unsigned Bits);
+
+/// Returns true for the integer widths the encryption passes handle
+/// (8/16/32/64). i1, i128 and non-power-of-two widths are left alone.
+bool isSupportedIntWidth(unsigned Bits);
+
+/// Returns true if Ty is an integer type of a supported width.
+bool isSupportedIntType(const llvm::Type *Ty);
+
 // ---- Hashing ----
 
 /// FNV-1a. Used both for compile-time integrity hashes that the C runtime

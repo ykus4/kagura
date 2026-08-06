@@ -162,7 +162,7 @@ static BasicBlock *makeBogusClone(BasicBlock *BB, Function *F) {
   return Clone;
 }
 
-static bool obfuscateFunction(Function &F, uint32_t Probability,
+static bool insertBogusFlow(Function &F, uint32_t Probability,
                               uint32_t Iterations, PRNG &RNG) {
   if (F.isDeclaration() || F.size() < 2)
     return false;
@@ -219,7 +219,7 @@ PreservedAnalyses BogusControlFlowPass::run(Function &F,
   if (!shouldObfuscate(F, "bcf"))
     return PreservedAnalyses::all();
   auto &RNG    = getModulePRNG();
-  bool Changed = obfuscateFunction(F, Probability, Iterations, RNG);
+  bool Changed = insertBogusFlow(F, Probability, Iterations, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 

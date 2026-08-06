@@ -16,7 +16,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "AES128.h"
+#include "Support/AES128.h"
 #include "kagura/Passes.h"
 #include "kagura/Utils.h"
 
