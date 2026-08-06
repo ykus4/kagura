@@ -6,11 +6,13 @@
  * function's encrypted bytecode, its arguments, a relocation pool and the
  * decryption key.
  *
- * The bytecode contract lives in include/kagura/VM.h.  Read it before touching
- * anything here: the opcode numbering, the one-byte width operands and the
- * "canonical unsigned form" value representation are all shared with the pass,
- * and the two sides silently computing different things is exactly the class of
- * bug this file used to have.
+ * The bytecode contract lives in include/kagura/VMOpcodes.def, which this file
+ * includes directly and which the pass reads through include/kagura/VM.h.  Read
+ * it before touching anything here: the one-byte width operands and the
+ * "canonical unsigned form" value representation are shared with the pass, and
+ * the two sides silently computing different things is exactly the class of bug
+ * this file used to have.  The opcode numbers themselves used to be a hand-kept
+ * second copy; they are not any more.
  *
  * The blob is never decrypted in memory.  Each byte is XOR-decrypted as it is
  * fetched with key[offset % 8], which keeps the global read-only, makes
@@ -23,69 +25,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ── Opcode definitions (must match include/kagura/VM.h) ──────────────────── */
+/* ── Opcodes and frame limits ──────────────────────────────────────────────
+ *
+ * From the same table the pass emits against.  An enum rather than #defines so
+ * a debugger can name the opcode it is stopped on. */
 
-#define OP_PUSH_IMM8   0x00
-#define OP_PUSH_IMM16  0x01
-#define OP_PUSH_IMM32  0x02
-#define OP_PUSH_IMM64  0x03
-#define OP_PUSH_REG    0x04
-#define OP_POP_REG     0x05
-#define OP_DUP         0x06
-#define OP_SWAP        0x07
-#define OP_PUSH_POOL   0x08
-#define OP_PUSH_FRAME  0x09
-#define OP_SELECT      0x0A
-#define OP_DROP        0x0B
-#define OP_ADD         0x10
-#define OP_SUB         0x11
-#define OP_MUL         0x12
-#define OP_UDIV        0x13
-#define OP_SDIV        0x14
-#define OP_UREM        0x15
-#define OP_SREM        0x16
-#define OP_AND         0x20
-#define OP_OR          0x21
-#define OP_XOR         0x22
-#define OP_NOT         0x23
-#define OP_SHL         0x24
-#define OP_LSHR        0x25
-#define OP_ASHR        0x26
-#define OP_ICMP_EQ     0x30
-#define OP_ICMP_NE     0x31
-#define OP_ICMP_ULT    0x32
-#define OP_ICMP_ULE    0x33
-#define OP_ICMP_UGT    0x34
-#define OP_ICMP_UGE    0x35
-#define OP_ICMP_SLT    0x36
-#define OP_ICMP_SLE    0x37
-#define OP_ICMP_SGT    0x38
-#define OP_ICMP_SGE    0x39
-#define OP_JMP         0x40
-#define OP_JZ          0x41
-#define OP_JNZ         0x42
-#define OP_CALL        0x43
-#define OP_RET         0x44
-#define OP_RET_VOID    0x45
-#define OP_LOAD8       0x50
-#define OP_LOAD16      0x51
-#define OP_LOAD32      0x52
-#define OP_LOAD64      0x53
-#define OP_STORE8      0x54
-#define OP_STORE16     0x55
-#define OP_STORE32     0x56
-#define OP_STORE64     0x57
-#define OP_ZEXT        0x60
-#define OP_SEXT        0x61
-#define OP_TRUNC       0x62
-#define OP_LOAD_ARG    0x70
-#define OP_NOP         0xFF
+enum vm_opcode {
+#define KAGURA_VM_OP(Name, Value) Name = Value,
+#include "kagura/VMOpcodes.def"
+};
 
-/* Limits — mirrored from kagura::vm in include/kagura/VM.h. */
-#define VM_NUM_REGS      256
-#define VM_STACK_SIZE    128
-#define VM_FRAME_SIZE    1024
-#define VM_MAX_CALL_ARGS 8
+#define KAGURA_VM_LIMIT(CppName, CName, Value) CName = Value,
+enum vm_limit {
+#include "kagura/VMOpcodes.def"
+};
 
 /* ── VM frame ─────────────────────────────────────────────────────────────── */
 

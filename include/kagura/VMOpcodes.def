@@ -1,0 +1,136 @@
+//===-- VMOpcodes.def - The kagura VM instruction set ---------------------===//
+//
+// The bytecode wire format, in one place. Two consumers:
+//
+//   include/kagura/VM.h            (C++) — what VMObfuscationPass emits
+//   runtime/core/vm_interpreter.c  (C)   — what executes it
+//
+// Both used to hold a hand-written copy of these 48 numbers, and the header
+// comment in each told the reader to remember to change the other. A silent
+// disagreement between the two would not fail to compile, would not fail a
+// test that only inspects IR, and would show up as a shipped binary computing
+// the wrong thing.
+//
+//   KAGURA_VM_OP(Name, Value)
+//   KAGURA_VM_LIMIT(CppName, CName, Value)
+//
+// Operand encoding is [8-bit opcode][operands, little-endian]. Values are held
+// in canonical unsigned form — the low N bits carry an iN, bits N..63 are
+// zero — which is why the arithmetic and comparison opcodes carry an explicit
+// one-byte operand width. See VM.h for the full rationale.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef KAGURA_VM_OP
+#define KAGURA_VM_OP(Name, Value)
+#endif
+
+#ifndef KAGURA_VM_LIMIT
+#define KAGURA_VM_LIMIT(CppName, CName, Value)
+#endif
+
+// ---- Stack operations ----
+KAGURA_VM_OP(OP_PUSH_IMM8,   0x00) // u8  imm    : push zero-extended immediate
+KAGURA_VM_OP(OP_PUSH_IMM16,  0x01) // u16 imm
+KAGURA_VM_OP(OP_PUSH_IMM32,  0x02) // u32 imm
+KAGURA_VM_OP(OP_PUSH_IMM64,  0x03) // u64 imm
+KAGURA_VM_OP(OP_PUSH_REG,    0x04) // u8  reg    : push virtual register
+KAGURA_VM_OP(OP_POP_REG,     0x05) // u8  reg    : pop into virtual register
+KAGURA_VM_OP(OP_DUP,         0x06)
+KAGURA_VM_OP(OP_SWAP,        0x07)
+KAGURA_VM_OP(OP_PUSH_POOL,   0x08) // u16 index  : push pool[index]
+KAGURA_VM_OP(OP_PUSH_FRAME,  0x09) // u16 offset : push &frame_arena[offset]
+KAGURA_VM_OP(OP_SELECT,      0x0A) //            : pop f, pop t, pop c; push c?t:f
+KAGURA_VM_OP(OP_DROP,        0x0B)
+
+// ---- Arithmetic ----
+// Each takes a u8 result width in bits (1..64). Pops b then a, pushes the
+// width-masked result of `a op b`. sdiv and srem sign-extend from the width
+// first, because canonical form has thrown the sign bit's position away.
+KAGURA_VM_OP(OP_ADD,         0x10)
+KAGURA_VM_OP(OP_SUB,         0x11)
+KAGURA_VM_OP(OP_MUL,         0x12)
+KAGURA_VM_OP(OP_UDIV,        0x13)
+KAGURA_VM_OP(OP_SDIV,        0x14)
+KAGURA_VM_OP(OP_UREM,        0x15)
+KAGURA_VM_OP(OP_SREM,        0x16)
+
+// ---- Bitwise — also width-tagged ----
+KAGURA_VM_OP(OP_AND,         0x20)
+KAGURA_VM_OP(OP_OR,          0x21)
+KAGURA_VM_OP(OP_XOR,         0x22)
+KAGURA_VM_OP(OP_NOT,         0x23) // pop 1, push 1
+KAGURA_VM_OP(OP_SHL,         0x24)
+KAGURA_VM_OP(OP_LSHR,        0x25)
+KAGURA_VM_OP(OP_ASHR,        0x26)
+
+// ---- Comparison — u8 operand width; pushes 0 or 1 ----
+KAGURA_VM_OP(OP_ICMP_EQ,     0x30)
+KAGURA_VM_OP(OP_ICMP_NE,     0x31)
+KAGURA_VM_OP(OP_ICMP_ULT,    0x32)
+KAGURA_VM_OP(OP_ICMP_ULE,    0x33)
+KAGURA_VM_OP(OP_ICMP_UGT,    0x34)
+KAGURA_VM_OP(OP_ICMP_UGE,    0x35)
+KAGURA_VM_OP(OP_ICMP_SLT,    0x36)
+KAGURA_VM_OP(OP_ICMP_SLE,    0x37)
+KAGURA_VM_OP(OP_ICMP_SGT,    0x38)
+KAGURA_VM_OP(OP_ICMP_SGE,    0x39)
+
+// ---- Control flow ----
+KAGURA_VM_OP(OP_JMP,         0x40) // u32 target : unconditional
+KAGURA_VM_OP(OP_JZ,          0x41) // u32 target : pop; jump if zero
+KAGURA_VM_OP(OP_JNZ,         0x42) // u32 target : pop; jump if non-zero
+KAGURA_VM_OP(OP_CALL,        0x43) // u8 nargs, u8 retw : pop args (last on
+                                   //   top), pop callee address, call
+                                   //   natively; retw == 0 means void (nothing
+                                   //   is pushed), else the result is masked to
+                                   //   retw bits.
+KAGURA_VM_OP(OP_RET,         0x44) // pop and return
+KAGURA_VM_OP(OP_RET_VOID,    0x45) // return 0
+
+// ---- Memory ----
+// The pointer is the deeper stack slot, the value the shallower one.
+KAGURA_VM_OP(OP_LOAD8,       0x50) // pop ptr, push zero-extended i8
+KAGURA_VM_OP(OP_LOAD16,      0x51)
+KAGURA_VM_OP(OP_LOAD32,      0x52)
+KAGURA_VM_OP(OP_LOAD64,      0x53)
+KAGURA_VM_OP(OP_STORE8,      0x54) // pop val, pop ptr, store
+KAGURA_VM_OP(OP_STORE16,     0x55)
+KAGURA_VM_OP(OP_STORE32,     0x56)
+KAGURA_VM_OP(OP_STORE64,     0x57)
+
+// ---- Type conversions ----
+KAGURA_VM_OP(OP_ZEXT,        0x60) // no operand: canonical form already is
+KAGURA_VM_OP(OP_SEXT,        0x61) // u8 source width
+KAGURA_VM_OP(OP_TRUNC,       0x62) // u8 destination width
+
+// ---- Argument passing ----
+KAGURA_VM_OP(OP_LOAD_ARG,    0x70) // u8 index   : push args[index]
+KAGURA_VM_OP(OP_NOP,         0xFF)
+
+// ---- Limits ----
+//
+// Virtual registers per frame. Register operands are one byte, so this may not
+// exceed 256.
+KAGURA_VM_LIMIT(kNumRegs,     VM_NUM_REGS,      256)
+
+// Value stack depth. Expression trees are lowered one operand at a time and the
+// deepest transient use is one slot per PHI node in a successor block, so this
+// is generous.
+KAGURA_VM_LIMIT(kStackSize,   VM_STACK_SIZE,    128)
+
+// Bytes of per-call scratch memory backing the function's `alloca`s. Addresses
+// handed out by OP_PUSH_FRAME point into it. The arena is 16-byte aligned, so
+// an alloca demanding more alignment than that is not virtualised.
+//
+// Together with the register and stack arrays this makes one VM frame a few
+// kilobytes: a virtualised recursive function is far hungrier for native stack
+// than its original, which bounds how deep it can safely go.
+KAGURA_VM_LIMIT(kFrameSize,   VM_FRAME_SIZE,    1024)
+
+// Maximum arguments in an OP_CALL. The interpreter dispatches through a fixed
+// set of prototypes, one per arity.
+KAGURA_VM_LIMIT(kMaxCallArgs, VM_MAX_CALL_ARGS, 8)
+
+#undef KAGURA_VM_OP
+#undef KAGURA_VM_LIMIT

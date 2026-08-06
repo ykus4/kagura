@@ -42,7 +42,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "kagura/Passes.h"
+#include "kagura/Passes/Data.h"
 #include "kagura/Utils.h"
 
 #include "llvm/IR/Function.h"

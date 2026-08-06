@@ -33,7 +33,6 @@ set(KAGURA_SOURCES
   Options.cpp
   Plugin.cpp
   Utils.cpp
-  ObfuscationMetrics.cpp
 )
 
 foreach(_dir IN LISTS KAGURA_PASS_DIRS)

@@ -45,7 +45,7 @@
 #define DEBUG_TYPE "kagura-fsplit"
 
 #include "kagura/Options.h"
-#include "kagura/Passes.h"
+#include "kagura/Passes/CFG.h"
 #include "kagura/Utils.h"
 
 #include "llvm/IR/BasicBlock.h"

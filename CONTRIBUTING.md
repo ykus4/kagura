@@ -20,16 +20,19 @@ bash build.sh build-debug -DCMAKE_BUILD_TYPE=Debug
 
 ## Adding a Pass
 
-`lib/Transforms/PassRegistry.def` is the single source of truth for the pass
-list. One row there generates the `cl::opt` enable flag (`Options.cpp`), the
-named-pass parsing callback and the `OptimizerLast` auto-pipeline entry
-(`Plugin.cpp`). Do **not** hand-register a pass in `Options.cpp` or
-`Plugin.cpp` — those files are X-macro expansions of the `.def`.
+`include/kagura/PassRegistry.def` is the single source of truth for the pass
+list. One row there generates the `cl::opt` enable flag and its extern
+declaration (`Options.cpp` / `Options.h`), the named-pass parsing callback, the
+`OptimizerLast` auto-pipeline entry (`Plugin.cpp`), the JSON policy key
+(`ConfigLoader.cpp`) and a link smoke test (`tests/CMakeLists.txt`). Do **not**
+hand-register a pass in any of those — they are all X-macro expansions of the
+`.def`.
 
-1. Add the pass declaration to `include/kagura/Passes.h`
-2. Implement in `lib/Transforms/<Subsystem>/YourPass.cpp`
-3. Register the source in `lib/Transforms/CMakeLists.txt` (an explicit list, not a glob)
-4. Add **one row** to `lib/Transforms/PassRegistry.def`:
+1. Add the pass declaration to `include/kagura/Passes/<Category>.h`, matching
+   the `lib/Transforms/` subdirectory you are about to put the source in
+2. Implement in `lib/Transforms/<Category>/YourPass.cpp`, including only
+   `kagura/Passes/<Category>.h` — not the `Passes.h` umbrella
+3. Add **one row** to `include/kagura/PassRegistry.def`:
    - `KAGURA_FN_PASS(Flag, "kagura-x", "Description", YourPass())` for a
      function pass, or `KAGURA_MOD_PASS(...)` for a module pass. `Flag` is the
      `kagura::opt::` symbol name; the row's position sets its position in the
@@ -37,11 +40,17 @@ named-pass parsing callback and the `OptimizerLast` auto-pipeline entry
    - `KAGURA_INFRA_PASS("kagura-x", YourPass())` only for infrastructure
      passes that are *not* driven by a plain bool flag — those still need a
      hand-written injection point in `Plugin.cpp`.
-5. Add a C source to `tests/pass-inputs/`
-6. Add a `kagura_add_pass_test()` entry in `tests/CMakeLists.txt`
-7. Add a FileCheck test in `tests/lit/<your-pass>.ll`
-8. Add the pass to the shared profiles in `integration/profiles/*.json` if it
-   should be on by default for FAST / BALANCED / STRONG
+   - `KAGURA_TUNING(...)` for a numeric parameter the pass reads.
+4. Add a C source to `tests/pass-inputs/`
+5. Add a `kagura_add_pass_test()` entry in `tests/CMakeLists.txt`
+6. Add a FileCheck test in `tests/lit/<your-pass>.ll`
+7. If the pass should be on by default for FAST / BALANCED / STRONG, add rows to
+   `lib/Transforms/Profiles.def` and run `scripts/ci/gen-profiles.py`. Do not
+   edit `integration/profiles/*.json` — they are generated and CI checks them.
+
+There is nothing to add to `lib/Transforms/CMakeLists.txt`: the source list and
+the unity-build groups are globbed per directory. A new *category* directory
+does need a line in `KAGURA_PASS_DIRS` there.
 
 ## Pass Guidelines
 
