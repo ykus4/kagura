@@ -165,6 +165,22 @@ void kagura_telemetry_event(uint32_t event_id);
 int  kagura_device_key(uint8_t out[16]);
 void kagura_device_mix_key(uint8_t key[16]);
 
+/* core/self_check.c — the aggregate anti-tamper entry points.
+ *
+ * AntiTamper.cpp emits kagura_self_check into main() and
+ * kagura_runtime_hash_check at the entry of each instrumented function on
+ * every target except Wasm, so all three have a definition everywhere.  They
+ * used to be defined in ios/jailbreak_detection.c, which is compiled only
+ * under if(APPLE); -kagura-anti-tamper could not link off Apple as a result.
+ *
+ * kagura_jailbreak_detected dispatches to whatever detectors the target has
+ * (ios/jailbreak_detection.c on Apple, android/root_paths.c on Android).  On
+ * Windows and desktop Linux it has none and returns 0, meaning "not detected"
+ * rather than "known clean" — see the comment on the definition. */
+int  kagura_jailbreak_detected(void);
+void kagura_self_check(void);
+void kagura_runtime_hash_check(void *fn, uint32_t expected_hash);
+
 /* core/crash_symbolication.c */
 void kagura_sym_init(void);
 const char *kagura_symbolicate(uintptr_t pc);
@@ -224,19 +240,12 @@ void kagura_anti_dump_init(void);
  * Apple / iOS  (runtime/ios/)
  * =========================================================================== */
 
-/* jailbreak_detection.c */
+/* jailbreak_detection.c — Apple-only definitions. */
 int  kagura_check_cydia_path(void);
 int  kagura_check_substrate_dylib(void);
 int  kagura_check_sandbox_escape(void);
 int  kagura_check_fork(void);
 int  kagura_check_dyld_env(void);
-int  kagura_check_su_binary(void);
-int  kagura_check_root_packages(void);
-int  kagura_check_test_keys(void);
-int  kagura_check_rw_system(void);
-int  kagura_jailbreak_detected(void);
-void kagura_self_check(void);
-void kagura_runtime_hash_check(void *fn, uint32_t expected_hash);
 
 /* ios_integrity.c */
 int  kagura_codesign_valid(void);
@@ -301,6 +310,16 @@ int  kagura_appattest_local_check(void);
 /* ===========================================================================
  * Android / Linux  (runtime/android/)
  * =========================================================================== */
+
+/* root_paths.c — basic root probes.  These were declared in the Apple section
+ * and defined in ios/jailbreak_detection.c behind `#if defined(__ANDROID__)`,
+ * i.e. in a file no Android build ever compiles, so they had never been built
+ * by any configuration.  They are unguarded in root_paths.c so that the
+ * desktop-Linux CI build type-checks them. */
+int  kagura_check_su_binary(void);
+int  kagura_check_root_packages(void);
+int  kagura_check_test_keys(void);
+int  kagura_check_rw_system(void);
 
 /* android_root_advanced.c */
 int  kagura_magisk_present(void);

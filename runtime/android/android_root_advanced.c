@@ -3,7 +3,7 @@
  * Magisk and Zygisk detection.
  * Xposed / LSPosed detection.
  *
- * These checks complement the basic root detection in jailbreak_detection.c
+ * These checks complement the basic root detection in android/root_paths.c
  * with framework-specific indicators that survive Magisk Hide / DenyList and
  * LSPosed's module loading.
  *

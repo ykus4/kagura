@@ -34,7 +34,7 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Provided by jailbreak_detection.c / anti_debug.c */
+/* Cross-TU symbols used below are declared in ../internal.h, not here. */
 
 /*
  * Check 1: __TEXT segment virtual memory protection.

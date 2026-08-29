@@ -32,11 +32,10 @@
 #include <string.h>
 #include <sys/stat.h>
 
-/* Forward declaration for the iOS substrate check from jailbreak_detection.c */
-#if defined(__APPLE__)
-#endif
-
-/* Forward declaration for the tamper response from jailbreak_detection.c */
+/* No hand-rolled externs here: kagura_check_substrate_dylib and
+ * kagura_tamper_detected both come from ../internal.h (see Rule 2 there).  The
+ * dangling `#if defined(__APPLE__)` / `#endif` pair that used to bracket the
+ * removed declarations went with them. */
 
 /* -------------------------------------------------------------------------
  * Internal helpers

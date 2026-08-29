@@ -33,6 +33,26 @@
 #  endif
 #endif
 
+/* KAGURA_HAVE_GETRANDOM - is getrandom() actually *declared* on this target?
+ *
+ * The header exists on Bionic, but bionic/libc/include/sys/random.h declares
+ * getrandom with __INTRODUCED_IN(28), so building against __ANDROID_API__ < 28
+ * leaves it undeclared and the call below fails to compile ("call to
+ * undeclared function", an error since C99 and hard-error in clang 16+).
+ * minSdk 21-27 is still a completely ordinary Android configuration, so this
+ * was a build break waiting for the first person to target one.
+ *
+ * Nothing is lost when the guard excludes it: the /dev/urandom read directly
+ * below is the same entropy source getrandom() draws from and needs no API
+ * level at all. */
+#if defined(__ANDROID__)
+#  if defined(__ANDROID_API__) && __ANDROID_API__ >= 28
+#    define KAGURA_HAVE_GETRANDOM 1
+#  endif
+#elif defined(__GLIBC__)
+#  define KAGURA_HAVE_GETRANDOM 1
+#endif
+
 #include <time.h>
 
 /* Last-resort mixer: ASLR of the stack and of this function, plus the clock.
@@ -69,7 +89,7 @@ uint64_t kagura_random_u64(void) {
     arc4random_buf(&v, sizeof(v));
     if (v) return v;
 #elif defined(__linux__) || defined(__ANDROID__)
-#  if defined(__GLIBC__) || defined(__ANDROID__)
+#  if defined(KAGURA_HAVE_GETRANDOM)
     {
         ssize_t n = getrandom(&v, sizeof(v), 0);
         if (n == (ssize_t)sizeof(v) && v)

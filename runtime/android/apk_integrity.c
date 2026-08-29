@@ -46,7 +46,7 @@
 #include <string.h>
 #include <unistd.h>
 
-/* Provided by jailbreak_detection.c */
+/* Cross-TU symbols used below are declared in ../internal.h, not here. */
 
 /* APK Signing Block magic: "APK Sig Block 42" (16 bytes) */
 static const uint8_t APK_SIG_MAGIC[16] = {
