@@ -41,7 +41,7 @@ Built on the **New Pass Manager** (LLVM 17+). Loaded as a pass plugin via `-fpas
 | Decompiler-readable control flow | CFG flattening + bogus control flow (`kagura-fla`, `kagura-bcf`) |
 | Memory editor / GameGuardian value freeze | Per-store/load XOR (`kagura-mvo`, `kagura-pe`) + `Protected<T>` runtime |
 | Frida / Substrate dynamic instrumentation | Runtime hook & breakpoint detection (`kagura-anti-debug`) |
-| Binary patching (NOP-ing checks) | Per-BB opcode checksums (`kagura-bbcheck`) |
+| Binary patching (NOP-ing checks) | Startup function checksums (`kagura-tamper`) |
 | Import table analysis | External calls via runtime-resolved thunks (`kagura-ci`) |
 | Jailbreak / root detection bypass | Mach-O / ELF integrity, Magisk / Zygisk / LSPosed detection |
 
@@ -65,7 +65,7 @@ Built on the **New Pass Manager** (LLVM 17+). Loaded as a pass plugin via `-fpas
 > flag is rejected with *"Unknown command line argument"*. Use the shipped
 > `kagura-opt`, or `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`, both
 > of which work on all supported versions. See
-> [Known issues](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md).
+> [Known issues](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md#known-issues).
 
 ```bash
 clang -fpass-plugin=KaguraObfuscator.dylib \

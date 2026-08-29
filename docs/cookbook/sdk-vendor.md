@@ -24,22 +24,21 @@ because your customer's app will crash. Soft responses only.
 {
   "profile": "STRONG",
   "passes": {
-    "str-aes":  true,
-    "wstr":     true,
-    "co":       true,
-    "fla":      true,
-    "bcf":      true,
-    "sub":      true,
-    "mvo":      true,
-    "pe":       true,
-    "genc":     true,
-    "sv":       true,
-    "honey":    true,
-    "ci":       true,
-    "vtp":      true,
-    "anti-debug": false,
-    "tamper":   false,
-    "bbcheck":  false
+    "str_aes":    true,
+    "wstr":       true,
+    "co":         true,
+    "fla":        true,
+    "bcf":        true,
+    "sub":        true,
+    "mvo":        true,
+    "pe":         true,
+    "genc":       true,
+    "sv":         true,
+    "honey":      true,
+    "ci":         true,
+    "anti_debug": false,
+    "tamper":     false,
+    "bbcheck":    false
   },
   "tuning": {
     "bcf_prob": 60,
@@ -48,9 +47,17 @@ because your customer's app will crash. Soft responses only.
 }
 ```
 
+The three `false` rows are the load-bearing part of this file, so spell them
+`anti_debug` — with an underscore, matching the flag name `-kagura-anti-debug`
+with `-` replaced by `_`. A key the loader does not recognise is ignored, and
+`"profile": "STRONG"` turns AntiDebug **on**: an unnoticed typo here is how you
+ship the aborting binary this whole page exists to avoid. Both spellings are
+accepted since 0.3.0, and `-kagura-config-strict` fails the build on anything
+the loader cannot act on — use it.
+
 Disabled passes — and why:
 
-- **`anti-debug` / `tamper`** — these can break legitimate consumer debugging
+- **`anti_debug` / `tamper`** — these can break legitimate consumer debugging
   workflows (Xcode debugger, Android Studio, crash reporters). Move those
   checks into a **user-opt-in** runtime API instead (see below).
 - **`bbcheck`** — same reasoning; introduces aborts that your consumer can't
@@ -58,10 +65,14 @@ Disabled passes — and why:
 
 ## Build
 
+`-kagura-vtp` has no policy-file key, so it goes on the command line:
+
 ```bash
 # Compile your SDK with obfuscation; consumers link the result normally
 clang -fpass-plugin=KaguraObfuscator.dylib \
       -mllvm -kagura-config=kagura-sdk-release.json \
+      -mllvm -kagura-config-strict \
+      -mllvm -kagura-vtp \
       -mllvm -kagura-sv \
       -mllvm -kagura-symmap \
       -mllvm -kagura-symmap-out=sdk-internal-symmap.json \
@@ -109,16 +120,30 @@ YSDK_EXPORT int YSDK_SelfCheck(void);   // returns 0 if intact, non-zero if tamp
 
 ```c
 // in your SDK
+#include "kagura/runtime.h"
+
 int YSDK_SelfCheck(void) {
-    if (kagura_self_check() != 0) return 1;
-    if (kagura_check_loaded_libraries() != 0) return 2;
-    if (kagura_check_breakpoints() != 0) return 3;
+    if (kagura_suspicious_lib_loaded())                              return 1;
+    if (kagura_check_sw_breakpoints() || kagura_check_hw_breakpoints()) return 2;
+    if (kagura_check_inline_hooks()   || kagura_check_got_hooks())      return 3;
     return 0;
 }
 ```
 
+Call only the `int kagura_check_*()` **predicates** here. Their `void
+kagura_*_check()` counterparts — `kagura_self_check()`,
+`kagura_check_breakpoints()`, `kagura_check_hooks()` — invoke the tamper hook
+themselves, which for an SDK means terminating inside your customer's app.
+They also return nothing, so `if (kagura_self_check() != 0)` does not even
+compile against `kagura/runtime.h`; it only appeared to work when the symbol
+was declared by hand.
+
 The consumer's app decides what to do with the result (refuse to issue
 licensed operations, send telemetry, etc.) — your SDK does **not** crash.
+
+If you want a graduated response rather than a boolean, the runtime ships one:
+accumulate with `kagura_soft_response_add()` and read
+`kagura_soft_response_level()` (`KAGURA_RESPONSE_OK` … `KAGURA_RESPONSE_KICK`).
 
 ## Per-customer variants
 

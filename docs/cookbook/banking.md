@@ -23,20 +23,20 @@ in this scenario. Spoiler: this is **defense in depth** — Kagura is one layer.
 {
   "profile": "STRONG",
   "passes": {
-    "str-aes":  true,
-    "wstr":     true,
-    "mvo":      true,
-    "pe":       true,
-    "co":       true,
-    "fla":      true,
-    "bcf":      true,
-    "sub":      true,
-    "bbcheck":  true,
-    "tamper":   true,
-    "anti-debug": true,
-    "ci":       true,
-    "sv":       true,
-    "honey":    true
+    "str_aes":    true,
+    "wstr":       true,
+    "mvo":        true,
+    "pe":         true,
+    "co":         true,
+    "fla":        true,
+    "bcf":        true,
+    "sub":        true,
+    "bbcheck":    true,
+    "tamper":     true,
+    "anti_debug": true,
+    "ci":         true,
+    "sv":         true,
+    "honey":      true
   },
   "tuning": {
     "bcf_prob": 60,
@@ -47,7 +47,7 @@ in this scenario. Spoiler: this is **defense in depth** — Kagura is one layer.
 
 Why these choices:
 
-- **`str-aes` + `wstr`** — encrypt all string literals (Swift `String`,
+- **`str_aes` + `wstr`** — encrypt all string literals (Swift `String`,
   Objective-C `@""`, Kotlin / Java string constants pulled into JNI) so
   `strings` returns nothing useful
 - **`mvo` + `pe`** — on-stack key buffers and pointers stay XOR-encrypted at
@@ -56,8 +56,12 @@ Why these choices:
   constants
 - **`fla` + `bcf`** with `bcf_prob: 60` — defeats Ghidra's CFG view in
   decompiler-resistant builds
-- **`bbcheck` + `tamper`** — catches binary patching attempts at every BB
-- **`anti-debug`** — drops the obvious "Cheat Engine attached as debugger"
+- **`tamper`** — catches binary patching by hashing the loaded text section
+- **`bbcheck`** — emits a per-basic-block checksum call site. It only detects
+  anything once you supply your own `kagura_bb_check`; the shipped one is a
+  weak always-pass stub. See [Anti-Analysis
+  Passes](../passes/anti-analysis.md).
+- **`anti_debug`** — drops the obvious "Cheat Engine attached as debugger"
   attacks
 - **`ci`** — hides imports from IDA's Import View
 - **`sv`** — strips non-public symbols so the dynamic symtab doesn't leak
@@ -107,29 +111,42 @@ In your application's startup path:
 #include "kagura/runtime.h"
 
 int app_init(void) {
-    // 1. Refuse to run on a tampered binary
-    if (kagura_self_check() != 0) {
-        // Don't abort() — soft-respond so the detection point isn't a
-        // tombstone an attacker can grep for in /var/mobile/Library/Logs.
+    // 1. Refuse to run on a tampered binary.
+    //    kagura_macho_tampered() is the predicate. Its response-shaped sibling
+    //    kagura_self_check() returns void and calls the tamper hook itself,
+    //    which is the opposite of what we want here: we want to soft-respond
+    //    so the detection point isn't a tombstone an attacker can grep for in
+    //    /var/mobile/Library/Logs.
+    if (kagura_macho_tampered()) {
         return -1;
     }
 
     // 2. Refuse to run with Frida / Substrate loaded
-    if (kagura_check_loaded_libraries() != 0) {
+    if (kagura_suspicious_lib_loaded()) {
         return -1;
     }
 
     // 3. Refuse to run on jailbroken / rooted devices for payment flows.
     //    (Use feature-gated UX; do not crash the app for non-payment flows.)
-    extern int kagura_jailbreak_check(void);  // iOS
-    extern int kagura_root_check(void);       // Android
-    if (kagura_jailbreak_check() || kagura_root_check()) {
+#if defined(__APPLE__)
+    if (kagura_jailbreak_detected()) {
+#elif defined(__ANDROID__)
+    if (kagura_magisk_present() || kagura_xposed_present()) {
+#else
+    if (0) {
+#endif
         // Disable payment UI; show a "not supported on this device" screen.
     }
 
     return 0;
 }
 ```
+
+Every name above comes from `kagura/runtime.h`. Do not hand-write `extern`
+declarations for them: a misspelling then links against nothing (or, if you
+mark it weak, silently evaluates to false) and the guard disappears without a
+word. `runtime/ios/device_attest.c` carries a comment about the time that
+happened to four checks at once.
 
 ## Verification
 

@@ -5,6 +5,7 @@
 > `-kagura-*` フラグが *"Unknown command line argument"* で拒否されます。同梱の
 > `kagura-opt`、または `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`
 > を使ってください（どちらも全対応バージョンで動作します）。
+> [既知の問題](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md#known-issues)。
 
 
 5分以内に Kagura で保護されたバイナリを作ります。
@@ -27,7 +28,13 @@
 
     - `plugin/KaguraObfuscator.{dylib,so}`
     - `runtime/libkagura_runtime.a`
-    - `include/kagura/*.h`
+    - `include/kagura/game_protect.h`, `include/kagura/VM.h`,
+      `include/kagura/VMOpcodes.def`
+
+    インストールされるヘッダはこの 3 つだけです
+    (`cmake/KaguraInstall.cmake`)。パスプラグイン側のヘッダ — `Options.h`,
+    `Passes.h`, `Passes/`, `Utils.h` — は意図的に同梱していません。バイナリ
+    リリースの利用者が持っていない LLVM のヘッダを include するためです。
 
 === "ソースからビルド"
 
@@ -85,7 +92,7 @@ opt --load-pass-plugin=path/to/KaguraObfuscator.dylib \
 clang your_file.opt.bc -o your_file
 ```
 
-## 5. 関数単位の制御
+## 5. 関数単位の制御 {#5-per-function-control}
 
 ```c
 // この関数にだけ強制的にパスを適用
@@ -103,7 +110,7 @@ int verify_license(const char *key) { /* ... */ }
 
 ## 6. ランタイムをリンク (必要なら)
 
-一部のパス (`str-aes`, `vm`, `anti-debug`, `tamper`, `pac`, `ci`) は `libkagura_runtime.a` のリンクが必要です:
+一部のパスは自分では定義しないシンボルを呼び出します — `str-aes`, `vm`, `anti-debug`, `tamper`, `pac`, `ci`, `bbcheck`, `telemetry`, `objc`, `jni` — これらを使うターゲットは `libkagura_runtime.a` のリンクが必要です:
 
 ```bash
 clang your_file.c path/to/libkagura_runtime.a -o your_file

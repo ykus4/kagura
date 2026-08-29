@@ -23,21 +23,21 @@ invisible to the user.
 {
   "profile": "STRONG",
   "passes": {
-    "str-aes":  true,
-    "wstr":     true,
-    "co":       true,
-    "fla":      true,
-    "bcf":      true,
-    "sub":      true,
-    "mvo":      true,
-    "pe":       true,
-    "genc":     true,
-    "ci":       true,
-    "sv":       true,
-    "honey":    true,
-    "bbcheck":  true,
-    "tamper":   true,
-    "anti-debug": true
+    "str_aes":    true,
+    "wstr":       true,
+    "co":         true,
+    "fla":        true,
+    "bcf":        true,
+    "sub":        true,
+    "mvo":        true,
+    "pe":         true,
+    "genc":       true,
+    "ci":         true,
+    "sv":         true,
+    "honey":      true,
+    "bbcheck":    true,
+    "tamper":     true,
+    "anti_debug": true
   },
   "tuning": {
     "bcf_prob": 60,
@@ -49,8 +49,12 @@ invisible to the user.
 Everything STRONG plus `bbcheck` + `tamper` because:
 
 - A DRM binary's most common attack is `bsdiff` patching ("set `eax, 0`")
-- `bbcheck` detects per-BB modification at runtime
 - `tamper` catches whole-function modification at startup
+- `bbcheck` puts a per-basic-block checksum call site next to every branch —
+  but you have to write the `kagura_bb_check` that decides whether a checksum
+  is correct. The shipped one is a weak always-passing stub, so until you
+  override it this row costs you code size and detects nothing. See
+  [Anti-Analysis Passes](../passes/anti-analysis.md).
 
 ## Virtualize the license check
 
@@ -132,8 +136,24 @@ Crashing on detection is bad — users with corrupted disks / weird system
 clocks file support tickets. Instead, **silently degrade**:
 
 ```c
+#include "kagura/runtime.h"
+
 int app_startup(void) {
-    if (kagura_self_check() != 0) {
+    // Predicates, not the void kagura_*_check() responses: those invoke the
+    // tamper hook themselves, and "crash on detection" is exactly what this
+    // section is arguing against.
+    //
+    // The image-integrity check is per-loader-format, so it is per-platform:
+    // macho_integrity.c only builds on Apple, elf_integrity.c only on
+    // Linux/Android. Calling the wrong one is a link error, not a silent
+    // no-op.
+#if defined(__APPLE__)
+    if (kagura_macho_tampered()) {
+#elif defined(__unix__)
+    if (kagura_elf_tampered()) {
+#else
+    if (0) {
+#endif
         // Don't crash. Just go into "limited" mode:
         //   - Save to disk every 30s with a 50% chance of "I/O error"
         //   - Random 200ms hitches every 10s
@@ -142,7 +162,7 @@ int app_startup(void) {
         return 0;
     }
 
-    if (kagura_check_breakpoints() != 0) {
+    if (kagura_check_sw_breakpoints() || kagura_check_hw_breakpoints()) {
         // Debug-attached. Don't crash, but compute results from a poisoned
         // RNG so a cracker's "step through and see what happens" session
         // produces nondeterministic garbage.

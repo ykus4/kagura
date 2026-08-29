@@ -13,7 +13,7 @@ a representative mobile game module (~200 functions, Cortex-A55).
 | `mvo` | +15 – 40% / fn | 5 – 12% on alloca-heavy code | Pairs with `pe` for maximum coverage |
 | `vm`  | −30 to +200% | 10 – 50× slowdown | Reserve for small, rarely-called functions (license check, crypto init) |
 | `anti-debug` | +<1% | Negligible (startup only) | One-time check at init |
-| `bbcheck` | +10 – 20% | 2 – 5% | Per-BB overhead; use on security-critical functions only |
+| `bbcheck` | +10 – 20% | 2 – 5% | **Scaffolding cost only.** This is what the call sites cost; the shipped `kagura_bb_check` always returns "intact", so you are paying it for no detection. See [Anti-Analysis](anti-analysis.md#-kagura-bbcheck-detects-nothing-as-shipped) |
 
 ## Recommendation
 

@@ -5,7 +5,7 @@
 > flag is rejected with *"Unknown command line argument"*. Use the shipped
 > `kagura-opt`, or `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`, both
 > of which work on all supported versions. See
-> [Known issues](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md).
+> [Known issues](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md#known-issues).
 
 
 Get a Kagura-protected binary in under five minutes.
@@ -28,7 +28,13 @@ Get a Kagura-protected binary in under five minutes.
 
     - `plugin/KaguraObfuscator.{dylib,so}`
     - `runtime/libkagura_runtime.a`
-    - `include/kagura/*.h`
+    - `include/kagura/game_protect.h`, `include/kagura/VM.h`,
+      `include/kagura/VMOpcodes.def`
+
+    Only those three headers are installed
+    (`cmake/KaguraInstall.cmake`). The pass-plugin headers — `Options.h`,
+    `Passes.h`, `Passes/`, `Utils.h` — are deliberately not shipped: they
+    include LLVM headers a consumer of the binary release does not have.
 
 === "Build from source"
 
@@ -104,8 +110,9 @@ int verify_license(const char *key) { /* ... */ }
 
 ## 6. Link the runtime (if required)
 
-Some passes (`str-aes`, `vm`, `anti-debug`, `tamper`, `pac`, `ci`) require linking
-`libkagura_runtime.a`:
+Some passes call symbols they do not define — `str-aes`, `vm`, `anti-debug`,
+`tamper`, `pac`, `ci`, `bbcheck`, `telemetry`, `objc` and `jni` — and those
+targets must link `libkagura_runtime.a`:
 
 ```bash
 clang your_file.c path/to/libkagura_runtime.a -o your_file

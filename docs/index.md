@@ -5,7 +5,7 @@
 > flag is rejected with *"Unknown command line argument"*. Use the shipped
 > `kagura-opt`, or `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`, both
 > of which work on all supported versions. See
-> [Known issues](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md).
+> [Known issues](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md#known-issues).
 
 
 > **LLVM-based code obfuscation and anti-tamper toolkit for mobile, desktop, and WebAssembly targets.**
@@ -50,7 +50,7 @@ Kagura addresses this at the IR level — before the compiler turns IR into mach
 | Decompiler-readable control flow | `kagura-fla` + `kagura-bcf` — CFG becomes a switch-dispatched state machine with opaque dead branches |
 | Memory editor / GameGuardian value freeze | `kagura-mvo` / `kagura-pe` / `Protected<T>` — values stored XOR-encrypted at every alloca site |
 | Frida / Substrate dynamic instrumentation | `kagura-anti-debug` + loaded-library scan — detects and responds to hooking frameworks at runtime |
-| Binary patching (NOP-ing integrity checks) | `kagura-bbcheck` — per-basic-block opcode checksums abort on binary modification |
+| Binary patching (NOP-ing integrity checks) | `kagura-tamper` — function checksums verified at startup, response via an overridable hook |
 | Import table analysis (IDA external calls) | `kagura-ci` — external calls routed through runtime-resolved thunk table |
 | Jailbreak / root detection bypass | Runtime module: Mach-O integrity, ELF tampering, Magisk/Zygisk/LSPosed detection |
 

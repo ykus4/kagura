@@ -5,7 +5,7 @@ All notable changes to Kagura are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] — 2026-08-30
 
 A repair release. Several documented flags did nothing at all; a few produced
 binaries that could not link or crashed the compiler. In every case the reason
@@ -51,6 +51,24 @@ Precedence is also now defined, where before it was undefined: an explicit
 command-line flag beats the config file, so
 `-kagura-config=p.json -kagura-str=false` disables string encryption rather
 than having the profile preset silently overwrite it.
+
+**Symbol filter lists merge instead of replacing.** `"allowlist"`,
+`"denylist"` and `"protect"` in a policy file used to overwrite
+`-kagura-allow` / `-kagura-deny` / `-kagura-protect` outright, which both
+contradicted that precedence rule and re-obfuscated the symbols the user had
+just excluded on the command line. The result is now the union of the two
+sources. If you were relying on the JSON winning, move the entries you want
+into the JSON — the flag no longer disappears. `"audit_out"` is a scalar and
+follows the ordinary rule: `-kagura-audit-out` on the command line now wins.
+
+**A policy file with a key the loader does not understand now says so.**
+`"anti-debug": false` (hyphen) matched nothing and was dropped in silence, so
+every hand-written example in the docs — including one that told SDK vendors
+how to build a non-aborting binary — quietly did the opposite of what it said.
+Hyphens and underscores are now interchangeable on read, and any remaining
+unrecognised key is reported by name. Add `-kagura-config-strict` to fail the
+build instead of warning. Expect new warnings on existing policy files; each
+one is a setting that was never taking effect.
 
 ### Fixed
 
@@ -185,6 +203,17 @@ than having the profile preset silently overwrite it.
 - `runtime/internal.h`. `runtime/` had no headers at all; every cross-TU
   contract was a hand-written `extern`, `kagura_on_tamper_detected` alone
   appearing 19 times in three inconsistent forms.
+- `include/kagura/runtime.h` — the public C API of the runtime: the detectors
+  an integrator can call, the hooks they can override, and the protected value
+  types. `docs/runtime.md` had promised this header for some time and it did
+  not exist, so every "Runtime hardening" sample in the cookbook failed at the
+  `#include`. It also documents the trap those samples fell into: an
+  `int kagura_check_*()` is a predicate, a `void kagura_*_check()` runs the
+  check *and* fires the tamper hook, and the two are not interchangeable.
+  (Not yet in the install list.)
+- **`-kagura-config-strict`** — treat an unrecognised key in a policy file as
+  an error rather than a warning. Intended for CI: an ignored key is a silent
+  downgrade of the shipped binary and is invisible in the build output.
 - `docs/requirements.txt`, pinning the documentation toolchain.
 
 ### Changed
@@ -246,6 +275,50 @@ step by a comment asking the reader to remember the others.
   to consumers who have no LLVM — and which excluded the `.def` files those
   headers expand, so the installed `Options.h` could not be included at all.
 
+#### Documentation
+
+- **Every hand-written JSON example used keys the loader could not read.**
+  `"str-aes"`, `"anti-debug"` and friends are spelled with underscores in the
+  schema, and the doc examples used hyphens throughout, so none of them did
+  anything. `docs/cookbook/sdk-vendor.md` was the worst case: it explained that
+  an SDK must not crash on detection and then wrote `"anti-debug": false`,
+  which was ignored, leaving `"profile": "STRONG"`'s AntiDebug on. The loader
+  now accepts both spellings and the examples use the canonical one.
+- **`docs/runtime.md` cited a header and two functions that do not exist.**
+  `include/kagura/runtime.h` now exists (see Added);
+  `kagura_check_loaded_libraries` was never a symbol — the real name is
+  `kagura_suspicious_lib_loaded` — and `kagura_run_review_risk_check` is the
+  shell script `scripts/cli/review-risk-assessment.sh`, not a C function. The
+  same three names appeared across four cookbook pages.
+- **The required-symbol matrix was wrong in most rows.** It listed
+  `kagura_anti_debug_init` as required *from* the runtime when the pass defines
+  it, named two AntiDebug symbols that no pass emits, credited
+  StringEncryptionAES with `kagura_zero_buf`, and had no row at all for
+  BasicBlockChecksum, Telemetry, JNIObfuscation or ObjCObfuscation. Rebuilt
+  from the emitters in `lib/Transforms/`.
+- **`-kagura-bbcheck` was advertised as working anti-patching.** It is
+  scaffolding: the shipped `kagura_bb_check` is a weak always-passing stub, as
+  Known issues has said since 0.2.1. It has been removed from the README threat
+  table, downgraded in `docs/security-model.md`, and its `performance.md`
+  figures relabelled as the cost of the call sites alone.
+- **Six Japanese "translation coming later" stubs deleted.**
+  `docs/integration/{xcode,android,unreal,unity,cmake}.ja.md` and
+  `docs/contributing.ja.md` were 13-line placeholders standing in front of
+  English originals of up to 535 lines, and `mkdocs-static-i18n` already falls
+  back to the complete English page when a `.ja.md` is absent. A JA reader now
+  gets the real page instead of a dead end. `cmake.ja.md` also carried a
+  profile table that contradicted `Profiles.def`.
+- Four `.ja.md` pages had drifted from their English originals and were
+  brought back into sync: `passes/data.ja.md` and `pass-order.ja.md` were
+  missing `-kagura-string-split` and `-kagura-cse-break`,
+  `passes/before-after.ja.md` was missing two whole sections, and
+  `index.ja.md` was missing the Cookbook and Security Model cards.
+- `docs/tuning.md` claimed every flag on the page could be set from `"tuning"`;
+  five can. `docs/passes/{control-flow,platform}.md` filed `elt`, `vtp` and
+  `vm` under the wrong subsystem — the same mismatch `include/kagura/Passes.h`
+  records having fixed on the header side. `quick-start.md` claimed the release
+  archive ships `include/kagura/*.h`; it ships three files.
+
 ### Known issues
 
 - **`clang -fpass-plugin=… -mllvm -kagura-…` does not work below LLVM 22.**
@@ -273,9 +346,11 @@ step by a comment asking the reader to remember the others.
   `tests/frida_resistance/` are not, so nothing checks that the resistance
   claims in `docs/security-model.md` still hold. `scripts/eval/battery_impact.py`
   is the only other one wired up.
-- **A JSON policy file is not validated.** An unrecognised `"profile"` name now
-  warns, but a misspelt key inside `"passes"` or `"tuning"` is still ignored in
-  silence, so `"fal": true` reads as "flattening off" with no diagnostic.
+- **A policy file cannot be validated without compiling something.** Unknown
+  keys are diagnosed now, and `-kagura-config-strict` makes them fatal, but
+  both still require a translation unit to run against. A `-kagura-config-check`
+  mode that lints the file on its own — for an editor or a pre-commit hook —
+  is still open (TODO D.1a).
 
 ## [0.2.1] — 2026-07-31
 

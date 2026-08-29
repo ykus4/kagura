@@ -12,8 +12,10 @@ Passes are grouped by purpose:
   alloca'd values.
 - [**Anti-Analysis**](anti-analysis.md) — detect debuggers / hooking
   frameworks, verify integrity, hide symbols.
-- [**Platform-Specific**](platform.md) — ObjC selector / class obfuscation,
-  JNI dynamic registration, VM virtualization.
+- [**Platform-Specific**](platform.md) — ObjC selector / class obfuscation and
+  JNI dynamic registration, plus VM virtualization (which is not
+  platform-specific; it is documented there for convenience and lives in
+  `lib/Transforms/VM/`).
 - [**Infrastructure**](infrastructure.md) — DWARF control, config loader,
   symbol map, audit log.
 
