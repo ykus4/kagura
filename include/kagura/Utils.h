@@ -131,6 +131,15 @@ private:
 /// Returns the module-level PRNG (seeded from -kagura-seed or system entropy).
 PRNG &getModulePRNG();
 
+/// A random N-bit value, already narrowed so it can be handed to APInt or
+/// ConstantInt without asserting.
+///
+/// maskForWidth() above exists for this and three call sites use it; four
+/// others kept writing `APInt(Bits, RNG.next())` by hand, which asserts on any
+/// width below 64 in a build with assertions enabled. Draw through this and
+/// forgetting the mask stops being possible.
+uint64_t randomForWidth(PRNG &RNG, unsigned Bits);
+
 // ---- IR helpers ----
 
 /// Demote all PHI nodes in F to alloca/load/store (needed before flattening).

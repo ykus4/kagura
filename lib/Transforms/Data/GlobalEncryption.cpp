@@ -309,8 +309,16 @@ static bool encryptArrayGlobal(GlobalVariable *GV, PRNG &RNG) {
   Constant *OldInit = GV->getInitializer();
   std::vector<Constant *> EncElems;
   EncElems.reserve(N);
+  // The index is mixed into the key, so it has to be narrowed to the *element*
+  // width, not used raw: a [512 x i8] global asserts at I == 256 otherwise.
+  // Encryption and decryption both go through elemKey(), so the two cannot
+  // disagree about the narrowing.
+  auto elemKey = [&](uint64_t Idx) {
+    return BaseKey ^ APInt(Bits, Idx & maskForWidth(Bits));
+  };
+
   for (uint64_t I = 0; I < N; ++I) {
-    APInt ElemKey   = BaseKey ^ APInt(Bits, I);
+    APInt ElemKey   = elemKey(I);
     APInt PlainVal  = getArrayElement(OldInit, I, ElemTy);
     APInt EncVal    = PlainVal ^ ElemKey;
     EncElems.push_back(ConstantInt::get(ElemTy, EncVal));
@@ -321,7 +329,7 @@ static bool encryptArrayGlobal(GlobalVariable *GV, PRNG &RNG) {
 
   // At each load site for element[i], inject XOR with (BaseKey ^ i).
   for (auto &AL : Loads) {
-    APInt ElemKey  = BaseKey ^ APInt(Bits, AL.ElemIdx);
+    APInt ElemKey  = elemKey(AL.ElemIdx);
     auto *KeyConst = ConstantInt::get(ElemTy, ElemKey);
     IRBuilder<> B(AL.LI->getNextNode());
     auto *Decrypted = B.CreateXor(AL.LI, KeyConst,

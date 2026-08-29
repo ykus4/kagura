@@ -87,6 +87,14 @@ uint64_t maskForWidth(unsigned Bits) {
   return Bits >= 64 ? ~0ULL : ((1ULL << Bits) - 1);
 }
 
+uint64_t randomForWidth(PRNG &RNG, unsigned Bits) {
+  // next32() below 32 bits keeps the draw count identical to what the passes
+  // that already masked by hand were doing, so this does not perturb the key
+  // stream of anything that was already correct.
+  uint64_t Raw = Bits <= 32 ? RNG.next32() : RNG.next();
+  return Raw & maskForWidth(Bits);
+}
+
 bool isSupportedIntWidth(unsigned Bits) {
   return Bits == 8 || Bits == 16 || Bits == 32 || Bits == 64;
 }

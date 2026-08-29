@@ -99,7 +99,11 @@ PreservedAnalyses PointerEncryptionPass::run(Function &F,
   }
 
   for (auto *AI : Targets) {
-    APInt Key(PtrBits, RNG.next());
+    // Masked to PtrBits: on a 32-bit target — armv7, wasm32, i386, all
+    // supported here — an unmasked 64-bit draw makes the APInt constructor
+    // assert "Value is not an N-bit unsigned value", which is a compiler
+    // crash in the assertions CI job rather than a bad key.
+    APInt Key(PtrBits, randomForWidth(RNG, PtrBits));
 
     // The alloca remains a pointer-sized slot; loads/stores are rewritten to
     // use the target's intptr width.
