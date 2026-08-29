@@ -1,10 +1,27 @@
 find_package(LLVM REQUIRED CONFIG)
 
-# Plugin-based tests (opt --load-pass-plugin) require a loadable module (.so/.dylib/.dll).
-# When LLVM is built without plugin support — e.g. the MSVC-targeted Windows tarball sets
-# LLVM_ENABLE_PLUGINS=OFF — there is no module to load.  The passes are still reachable
-# through kagura-opt, which links them in statically, so run the smoke tests through that
-# tool instead of leaving the platform completely untested.
+set(LLVM_BIN ${LLVM_TOOLS_BINARY_DIR})
+
+# ── How the tests reach the passes ────────────────────────────────────────────
+#
+# Plugin-based tests (opt --load-pass-plugin) require a loadable module
+# (.so/.dylib/.dll).  When LLVM is built without plugin support — e.g. the
+# MSVC-targeted Windows tarball sets LLVM_ENABLE_PLUGINS=OFF — there is no
+# module to load.  The passes are still reachable through kagura-opt, which
+# links them in statically.
+#
+# This file used to `return()` right after registering four kagura-opt smoke
+# tests in that case.  The only CI job that runs ctest on Linux configures with
+# KAGURA_FORCE_STATIC_PLUGIN=ON, so on Linux that early return dropped all 30
+# link tests, 22 pass tests, 8 regression tests, 12 integration tests and the
+# whole lit suite — 4 tests registered instead of 73, on a project that
+# advertises iOS/Android/macOS/Windows/Linux/Wasm.
+#
+# Everything below is therefore written against KAGURA_PASS_DRIVER, which names
+# whichever driver this build has; tests/kagura_driver.cmake translates an opt
+# pipeline string into kagura-opt flags when needed.  Only the lit suite, whose
+# RUN lines spell out `-load-pass-plugin`, is genuinely loadable-module-only,
+# and it is registered as a skipped ctest entry rather than silently omitted.
 if(KAGURA_PLUGIN_STATIC)
   if(NOT KAGURA_BITCODE_TOOLS)
     message(STATUS "[kagura] Tests skipped: static plugin build without kagura-opt.")
@@ -16,10 +33,19 @@ if(KAGURA_PLUGIN_STATIC)
     return()
   endif()
 
-  message(STATUS "[kagura] Static plugin build — running pass tests via kagura-opt")
+  message(STATUS "[kagura] Static plugin build — pass tests run through kagura-opt")
+  set(KAGURA_PASS_DRIVER -DKAGURA_OPT=$<TARGET_FILE:kagura-opt>)
+else()
+  set(KAGURA_PASS_DRIVER -DPLUGIN=$<TARGET_FILE:KaguraObfuscator>)
+endif()
 
-  # One pass per test, driven through the statically linked tool.  The marker is
-  # checked against the transformed IR so a silently-inert pass fails the test.
+# ── kagura-opt CLI smoke tests (static builds only) ───────────────────────────
+#
+# These cover something no other test does: kagura-opt's own `-kagura-<flag>`
+# command line, which is the supported entry point on platforms with no
+# loadable module.  The marker is checked against the transformed IR so a
+# silently-inert pass fails the test.
+if(KAGURA_PLUGIN_STATIC)
   macro(kagura_add_tool_test TEST_NAME FLAG INPUT_FILE EXPECT_MARKER)
     add_test(NAME ${TEST_NAME}
       COMMAND ${CMAKE_COMMAND}
@@ -43,8 +69,6 @@ if(KAGURA_PLUGIN_STATIC)
     kagura-bcf bogus-control-flow.ll "@classify")
   kagura_add_tool_test(test_static_substitution
     kagura-sub substitution.ll "define i32 @arith")
-
-  return()
 endif()
 
 # Minimal test: compile a C file with the plugin and verify it doesn't crash
@@ -53,21 +77,23 @@ add_custom_target(check-kagura
   DEPENDS KaguraObfuscator
 )
 
-# Test helper: compile a simple C source with all passes enabled
-set(KAGURA_PLUGIN $<TARGET_FILE:KaguraObfuscator>)
-set(LLVM_BIN ${LLVM_TOOLS_BINARY_DIR})
+# NOTE on build ordering: none of the add_test() calls below can express "build
+# KaguraObfuscator first".  CTest's DEPENDS property orders tests by *test
+# name*; it was used here with a target name, which CTest ignores without a
+# warning, so it read as a build dependency and provided none.  `cmake --build`
+# before `ctest` is the contract, as in every CI job.
 
 # Use opt --load-pass-plugin -passes= for testing, which works across all
 # LLVM versions (avoids -mllvm cl::opt registration timing issues in LLVM 19).
-# Each test: clang -O0 -emit-llvm → opt --load-pass-plugin -passes=...
+# Each test: clang -O0/-O2 -emit-llvm → the pass driver → verify
 
-# Helper macro: create a two-stage test (C → IR → opt with pass)
+# Helper macro: create a two-stage test (C → IR → passes)
 macro(kagura_add_pass_test TEST_NAME PASS_PIPELINE SOURCE_FILE)
   add_test(NAME ${TEST_NAME}
     COMMAND ${CMAKE_COMMAND}
       -DCLANG=${LLVM_BIN}/clang
       -DOPT=${LLVM_BIN}/opt
-      -DPLUGIN=${KAGURA_PLUGIN}
+      ${KAGURA_PASS_DRIVER}
       -DPASSES=${PASS_PIPELINE}
       -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/pass-inputs/${SOURCE_FILE}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/run_pass_test.cmake
@@ -152,7 +178,7 @@ foreach(_row IN LISTS KAGURA_PASS_ROWS)
       COMMAND ${CMAKE_COMMAND}
         -DCLANG=${LLVM_BIN}/clang
         -DOPT=${LLVM_BIN}/opt
-        -DPLUGIN=${KAGURA_PLUGIN}
+        ${KAGURA_PASS_DRIVER}
         -DRUNTIME=$<TARGET_FILE:kagura_runtime>
         -DPIPELINE=${_pipeline}
         -DLABEL=${_cli}
@@ -178,6 +204,23 @@ find_program(FILECHECK_EXECUTABLE NAMES FileCheck
   DOC "LLVM FileCheck"
 )
 
+# Belongs in cmake/KaguraOptions.cmake with the rest of the user-facing
+# options; it is declared here only because the file that consumes it is the
+# one that can skip.
+#
+# Two CI jobs used to guard against a silently-skipped lit suite by grepping
+# `ctest -N` output for the test name, and one job (assertions) installed lit
+# and then never checked, so a pip failure would have dropped all 32 lit tests
+# from the only build with assertions compiled in. One option replaces both
+# greps: turn the skip into a configure error wherever the suite is expected.
+#
+# It deliberately does not apply to static-plugin builds: there the suite is
+# skipped for a structural reason (the RUN lines need a loadable module), not
+# because a tool is missing.
+option(KAGURA_REQUIRE_LIT
+       "Fail configuration if lit or FileCheck is missing instead of silently \
+skipping the FileCheck suite" OFF)
+
 # ---- Integration tests ------------------------------------------------------
 add_subdirectory(integration)
 
@@ -187,7 +230,20 @@ add_subdirectory(fuzz)
 # ---- Regression corpus ------------------------------------------------------
 add_subdirectory(regression)
 
-if(LIT_EXECUTABLE AND FILECHECK_EXECUTABLE)
+if(KAGURA_PLUGIN_STATIC)
+  # Visibly skipped, not silently absent: every RUN line in tests/lit spells
+  # out `-load-pass-plugin=%kagura_plugin`, and opt cannot dlopen the static
+  # archive this build produces.  Registering the skip means `ctest` reports it
+  # rather than the suite just not being in the list.
+  add_test(NAME lit-filecheck-skipped-static-plugin
+    COMMAND ${CMAKE_COMMAND} -E echo
+      "SKIPPED: the lit suite drives opt --load-pass-plugin, which needs a "
+      "loadable module; this build links the passes into kagura-opt instead."
+  )
+  set_tests_properties(lit-filecheck-skipped-static-plugin PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:"
+  )
+elseif(LIT_EXECUTABLE AND FILECHECK_EXECUTABLE)
   set(KAGURA_PLUGIN_PATH $<TARGET_FILE:KaguraObfuscator>)
 
   # configure_file() expands @VAR@ but leaves $<TARGET_FILE:...> untouched, so
@@ -213,10 +269,35 @@ if(LIT_EXECUTABLE AND FILECHECK_EXECUTABLE)
     COMMAND ${LIT_EXECUTABLE} -sv ${CMAKE_CURRENT_BINARY_DIR}/lit
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
-  set_tests_properties(lit-filecheck PROPERTIES
-    DEPENDS KaguraObfuscator
-  )
+elseif(KAGURA_REQUIRE_LIT)
+  message(FATAL_ERROR
+    "KAGURA_REQUIRE_LIT=ON but the FileCheck suite cannot be registered:\n"
+    "  lit:       ${LIT_EXECUTABLE}\n"
+    "  FileCheck: ${FILECHECK_EXECUTABLE}\n"
+    "Install with: pip install lit   (FileCheck ships with LLVM)")
 else()
   message(STATUS "lit or FileCheck not found — skipping FileCheck tests")
   message(STATUS "  Install with: pip install lit   (FileCheck ships with LLVM)")
+endif()
+
+# ── lit vacuity guard ─────────────────────────────────────────────────────────
+#
+# A FileCheck test whose CHECK lines are all satisfied by its own *input*
+# asserts nothing.  Two of them were: basic-block-reordering.ll checked for
+# `switch i32` / `ret i32` and loop-transform.ll for `br i1`, all of which the
+# input already contained, so `opt -passes=verify` alone passed both — and BBR
+# had no other structural test at all.
+#
+# This runs exactly that experiment over every tests/lit/*.ll and fails if any
+# of them survives it.  It needs FileCheck but not the plugin, so it is
+# registered in static-plugin builds too.
+if(FILECHECK_EXECUTABLE)
+  add_test(NAME lit-vacuity-guard
+    COMMAND ${CMAKE_COMMAND}
+      -DOPT=${LLVM_BIN}/opt
+      -DFILECHECK=${FILECHECK_EXECUTABLE}
+      -DLIT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/lit
+      -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/vacuity
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_lit_vacuity.cmake
+  )
 endif()

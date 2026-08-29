@@ -3,7 +3,10 @@ import os
 import lit.formats
 
 config.name = "kagura"
-config.test_format = lit.formats.ShTest(True)
+# The internal shell, not the external one: lit 23 removes `execute_external`,
+# and every RUN line here is plain `%opt ... | %FileCheck ...` that the internal
+# shell handles.
+config.test_format = lit.formats.ShTest(execute_external=False)
 config.suffixes = [".ll"]
 
 # The .ll files live in the source tree; %t and the Output/ scratch dirs are

@@ -1,2 +1,3 @@
 PASS=function(kagura-vm)
 DESCRIPTION=VMObfuscation on a large function: bytecode jump offsets must use uint32 (not uint16) to avoid truncation
+EXPECT=kagura_vm_execute

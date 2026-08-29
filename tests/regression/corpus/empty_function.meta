@@ -1,2 +1,4 @@
 PASS=function(kagura-fla,kagura-bcf,kagura-sub,kagura-bbr,kagura-mvo,kagura-pe)
 DESCRIPTION=Trivial/empty functions: all passes must return cleanly without crashing
+# No EXPECT: the whole point of this entry is that every pass declines a
+# trivial/empty function, so there is nothing for it to have produced.

@@ -19,18 +19,22 @@
 #
 # Required -D parameters:
 #   CLANG     — clang driver
-#   OPT       — opt binary from the same LLVM
-#   PLUGIN    — path to the loadable pass plugin
+#   OPT       — opt binary from the same LLVM (also runs the verifier)
+#   PLUGIN    — path to the loadable pass plugin, OR
+#   KAGURA_OPT— path to kagura-opt, in a static-plugin build
 #   RUNTIME   — path to libkagura_runtime.a
 #   PIPELINE  — pass pipeline for opt, e.g. "kagura-str" or "function(kagura-fla)"
 #   LABEL     — name used in temp files and diagnostics
 #   SOURCES   — ';'-separated list of C subjects to build
 
-foreach(_var CLANG OPT PLUGIN RUNTIME PIPELINE LABEL SOURCES)
+include(${CMAKE_CURRENT_LIST_DIR}/kagura_driver.cmake)
+
+foreach(_var CLANG RUNTIME PIPELINE LABEL SOURCES)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "run_link_test.cmake: -D${_var} is required")
   endif()
 endforeach()
+kagura_require_driver(run_link_test.cmake)
 
 set(_failures "")
 
@@ -51,12 +55,9 @@ foreach(_src IN LISTS SOURCES)
   endif()
 
   # 2. Run the pass, and verify what it produced.
-  execute_process(
-    COMMAND ${OPT} --load-pass-plugin=${PLUGIN} -passes=${PIPELINE},verify
-            ${_bc} -o ${_obf}
-    RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+  kagura_apply_passes(${_bc} ${_obf} "${PIPELINE}" _rc _err)
   if(NOT _rc EQUAL 0)
-    string(APPEND _failures "\n--- ${LABEL}/${_stem}: opt -passes=${PIPELINE} failed ---\n${_out}${_err}")
+    string(APPEND _failures "\n--- ${LABEL}/${_stem}: ${PIPELINE} failed ---\n${_err}")
     continue()
   endif()
 

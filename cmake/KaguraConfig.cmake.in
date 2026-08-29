@@ -1,0 +1,38 @@
+# KaguraConfig.cmake — package config for `find_package(Kagura)`.
+#
+# Provides:
+#   Kagura::kagura_runtime   imported target; link this into the protected app
+#   Kagura_PLUGIN            path to the pass plugin, for clang -fpass-plugin=
+#                            or opt --load-pass-plugin=
+#   Kagura_PROFILES_DIR      directory holding the JSON policy profiles
+#
+# The plugin is a path rather than an imported target on purpose: on ELF/Mach-O
+# it is a MODULE library, which CMake will not export because nothing can link
+# it. Consumers pass it to the compiler driver by name.
+
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/KaguraTargets.cmake")
+
+set_and_check(Kagura_LIBDIR "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+
+# The plugin's file name varies by platform (and by whether this build linked
+# the passes statically), so probe rather than guess.
+set(Kagura_PLUGIN "Kagura_PLUGIN-NOTFOUND")
+foreach(_kagura_cand
+        KaguraObfuscator.dylib libKaguraObfuscator.dylib
+        KaguraObfuscator.so    libKaguraObfuscator.so
+        KaguraObfuscator.dll   KaguraObfuscator.lib
+        libKaguraObfuscator.a)
+  if(EXISTS "${Kagura_LIBDIR}/${_kagura_cand}")
+    set(Kagura_PLUGIN "${Kagura_LIBDIR}/${_kagura_cand}")
+    break()
+  endif()
+endforeach()
+unset(_kagura_cand)
+
+if(EXISTS "@PACKAGE_CMAKE_INSTALL_DATADIR@/kagura/profiles")
+  set(Kagura_PROFILES_DIR "@PACKAGE_CMAKE_INSTALL_DATADIR@/kagura/profiles")
+endif()
+
+check_required_components(Kagura)
