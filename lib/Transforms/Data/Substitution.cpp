@@ -157,7 +157,7 @@ static bool substituteFunction(Function &F, uint32_t Iterations, PRNG &RNG) {
     SmallVector<BinaryOperator *, 16> Worklist;
     for (auto &BB : F) {
       // Skip kagura's own dispatcher blocks
-      if (BB.getName().starts_with("kagura."))
+      if (isGenerated(BB) || BB.getName().starts_with("kagura."))
         continue;
       for (auto &I : BB)
         if (auto *BO = dyn_cast<BinaryOperator>(&I))

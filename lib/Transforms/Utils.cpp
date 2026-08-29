@@ -64,6 +64,30 @@ bool hasAnnotation(Function &F, StringRef Attr) {
 
 // ---- Kagura-generated symbol recognition ----------------------------------
 
+// ---- Generated-IR marker ---------------------------------------------------
+
+static constexpr StringRef kGeneratedMD = "kagura.generated";
+
+void markGenerated(Instruction &I) {
+  I.setMetadata(kGeneratedMD, MDNode::get(I.getContext(), {}));
+}
+
+void markGenerated(BasicBlock &BB) {
+  for (Instruction &I : BB)
+    markGenerated(I);
+}
+
+bool isGenerated(const Instruction &I) {
+  return I.getMetadata(kGeneratedMD) != nullptr;
+}
+
+bool isGenerated(const BasicBlock &BB) {
+  for (const Instruction &I : BB)
+    if (isGenerated(I))
+      return true;
+  return false;
+}
+
 bool isKaguraSymbol(StringRef Name) {
   // Every prefix any kagura pass emits. Keep in sync when adding a pass that
   // creates new globals or helper functions; a missing entry means later
@@ -166,8 +190,13 @@ static bool matchesList(StringRef Name, StringRef List) {
 }
 
 bool shouldObfuscate(Function &F, StringRef PassAttr, bool GlobalFlag) {
-  // Never obfuscate kagura's own injected helper functions
-  if (F.getName().starts_with("kagura_"))
+  // Never obfuscate kagura's own injected helper functions.
+  //
+  // isKaguraSymbol rather than starts_with("kagura_"): the narrow test missed
+  // the __kg_* helpers FunctionSplit outlines and the kagura.* globals
+  // EncryptedLookupTable and ControlFlowFlattening emit, so later passes in
+  // the same pipeline re-obfuscated them.
+  if (isKaguraSymbol(F.getName()))
     return false;
 
   // 4.1.9: Sanitizer compatibility — skip obfuscation when ASan, TSan, UBSan,

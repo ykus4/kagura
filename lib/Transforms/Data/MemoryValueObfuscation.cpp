@@ -93,7 +93,7 @@ PreservedAnalyses MemoryValueObfuscationPass::run(Function &F,
       if (auto *AI = dyn_cast<AllocaInst>(&I)) {
         // Skip kagura's own injected allocas (e.g. FLA's dispatch variable).
         // After optimization the name is stripped, so detect structurally.
-        if (AI->getName().starts_with("kagura."))
+        if (isGenerated(*AI) || AI->getName().starts_with("kagura."))
           continue;
         if (isFLADispatchAlloca(AI))
           continue;

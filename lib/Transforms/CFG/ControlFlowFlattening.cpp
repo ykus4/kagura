@@ -142,6 +142,16 @@ static bool flattenFunction(Function &F, PRNG &RNG) {
   // LoopEnd -> LoopHeader
   IRBuilder<>(LoopEnd).CreateBr(LoopHeader);
 
+  // Mark the dispatcher so the passes that run after this one can recognise
+  // it. They all used to test for the "kagura." name prefix, which is an
+  // empty string under -fdiscard-value-names — i.e. in every shipping
+  // toolchain. The alloca is marked too: MemoryValueObfuscation keys off it.
+  markGenerated(*PreLoop);
+  markGenerated(*LoopHeader);
+  markGenerated(*LoopEnd);
+  markGenerated(*DefaultBB);
+  markGenerated(*SwitchVar);
+
   // Step 7: Wire each work block into the switch
   for (auto *BB : WorkBlocks) {
     Switch->addCase(ConstantInt::get(Int32Ty, CaseMap[BB]), BB);

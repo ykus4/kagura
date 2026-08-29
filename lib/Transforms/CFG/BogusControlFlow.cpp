@@ -234,7 +234,7 @@ static bool insertBogusFlow(Function &F, uint32_t Probability,
       if (isa<InvokeInst>(BB->getTerminator()))
         continue;
       // Don't inject into kagura's own dispatcher/loop blocks
-      if (BB->getName().starts_with("kagura."))
+      if (isGenerated(*BB) || BB->getName().starts_with("kagura."))
         continue;
       // Don't inject into blocks with SwitchInst (flattening dispatcher)
       if (isa<SwitchInst>(BB->getTerminator()))

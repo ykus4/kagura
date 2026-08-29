@@ -51,6 +51,23 @@ bool shouldObfuscate(llvm::Function &F, llvm::StringRef PassAttr,
 /// by later passes. This recognises every prefix kagura actually emits.
 bool isKaguraSymbol(llvm::StringRef Name);
 
+/// Mark IR that kagura generated, so later passes can leave it alone.
+///
+/// Six passes tested `BB.getName().starts_with("kagura.")` for this. Clang
+/// enables -fdiscard-value-names by default whenever LLVM is built without
+/// assertions — which is every shipping toolchain — and local value and block
+/// names are then empty strings. All six guards were dead in exactly the
+/// configuration users compile in, so each pass reprocessed the control-flow
+/// dispatcher it was supposed to skip. Metadata survives name discarding.
+///
+/// The block form marks every instruction present at the time of the call;
+/// isGenerated() answers true if any instruction in the block carries the
+/// marker, so instructions added later do not have to be marked too.
+void markGenerated(llvm::Instruction &I);
+void markGenerated(llvm::BasicBlock &BB);
+bool isGenerated(const llvm::Instruction &I);
+bool isGenerated(const llvm::BasicBlock &BB);
+
 // ---- Integer width helpers ----
 
 /// All-ones mask for an N-bit value, avoiding the UB of `1ULL << 64`.

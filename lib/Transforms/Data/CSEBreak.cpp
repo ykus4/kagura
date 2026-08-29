@@ -70,7 +70,8 @@ static bool isEligible(Instruction *I) {
   }
   if (BO->getNumUses() < 2) return false;
   // Skip dispatcher blocks
-  if (BO->getParent()->getName().starts_with("kagura."))
+  if (isGenerated(*BO->getParent()) ||
+      BO->getParent()->getName().starts_with("kagura."))
     return false;
   // Skip funclets — cloning into a different funclet would break EH
   if (BO->getParent()->isEHPad())

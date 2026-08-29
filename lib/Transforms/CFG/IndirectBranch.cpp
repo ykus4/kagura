@@ -164,7 +164,7 @@ static bool indirectifyCalls(Function &F, PRNG &RNG) {
   SmallVector<CallInst *, 32> Worklist;
   for (auto &BB : F) {
     // Don't touch kagura's own injected blocks
-    if (BB.getName().starts_with("kagura."))
+    if (isGenerated(BB) || BB.getName().starts_with("kagura."))
       continue;
     for (auto &I : BB) {
       auto *CI = dyn_cast<CallInst>(&I);
