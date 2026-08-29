@@ -20,11 +20,29 @@
 //   %t2 = add i32 %a, %b
 //   %y  = sub i32 %t2, 3
 //
-// A peephole pass would still merge these — to resist that we also XOR the
-// inputs with a random mask, then XOR-correct the result. The net function
-// is identical but the syntactic form is not the same, so LLVM's GVN /
-// EarlyCSE cannot re-merge them in a downstream pass and decompilers can't
-// pattern-match them as the same expression.
+// A verbatim re-duplication like that is worthless on its own: the two
+// expressions are syntactically identical over the same operands, which is
+// exactly what value numbering merges. Measured, `opt -passes=early-cse`
+// collapses the pair above back to one `add` in a single step.
+//
+// So each clone is laundered through a random per-clone mask that cancels at
+// the result (see cloneAt below). The net value is unchanged, the syntactic
+// form is not, and value numbering no longer sees a common subexpression.
+//
+// What this does and does not resist, measured rather than assumed:
+//
+//   early-cse       — resists. This is the pass the duplication is aimed at.
+//   early-cse,gvn   — resists.
+//   a full -O2      — does NOT resist. InstCombine and Reassociate know the
+//                     algebraic identities and fold `((a+m)+b)-m` back to
+//                     `a+b`, after which value numbering merges as before.
+//
+// That is acceptable because the pass runs on the OptimizerLast extension
+// point, so in a normal build nothing algebraic runs after it. It is a real
+// limitation under LTO, where the post-link pipeline reoptimises: prefer
+// -kagura-lto-safe there. Defeating InstCombine as well would need the mask
+// to come from a value it cannot reason about, at the cost of a memory
+// access per clone.
 //
 // Eligibility
 // -----------
@@ -47,6 +65,7 @@
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 
 using namespace llvm;
@@ -79,36 +98,73 @@ static bool isEligible(Instruction *I) {
   return true;
 }
 
-// Re-emit `BO` immediately before `InsertPt` with an XOR-mask laundering
-// that cancels at the result: result = op(a^m, b^m) ^ {0 for and/or/xor,
-// otherwise direct re-emit}. To keep semantics, we use the simplest form
-// that's also a perfect roundtrip:
+// Re-emit `BO` before `InsertPt`, laundered through a random per-clone mask
+// that cancels exactly at the result.
 //
-//   add/sub/mul: re-emit verbatim (relies on later O0/O1 not running CSE
-//                again on a different mask — the OptimizerLast EP runs
-//                after standard optimizations).
-//   and:  (a ^ 0) & (b ^ 0) — semantics-preserving identity that LLVM
-//         still has to prove away.
-//   or:   same.
-//   xor:  same.
+// The verbatim re-emit this used to do was a no-op with a cost. The clones
+// were textually identical expressions over the same operands, which is
+// precisely what EarlyCSE and GVN exist to merge, and both run after this
+// pass on the OptimizerLast extension point. The file header described the
+// masking as if it were implemented; the RNG parameter was spelled
+// `/*RNG*/`.
 //
-// In practice the verbatim re-emit alone defeats decompilers because they
-// observe the textual form of the binary, not LLVM's internal value
-// numbering. We keep the function trivial and rely on running BEFORE later
-// LLVM passes don't undo it — see Plugin.cpp pass-order.
-static Value *cloneAt(BinaryOperator *BO, Instruction *InsertPt) {
+// One exact identity per opcode, all in modular arithmetic so they hold for
+// every mask:
+//
+//   a + b  ==  ((a + m) + b) - m
+//   a - b  ==  ((a + m) - b) - m
+//   a * b  ==  ((a + m) * b) - (m * b)
+//   a & b  ==  ((a ^ m) & b) ^ (m & b)
+//   a | b  ==  ((a ^ m) | b) ^ (m & ~b)
+//   a ^ b  ==  ((a ^ m) ^ b) ^ m
+//
+// nuw/nsw/exact are deliberately NOT copied onto these. The intermediates
+// legitimately wrap — that is what makes the identity hold — so carrying a
+// no-wrap promise onto them would make the value poison and hand the
+// optimiser a licence to delete the whole chain. Dropping the flags only
+// costs optimisation on the clone; the original keeps them.
+static Value *cloneAt(BinaryOperator *BO, Instruction *InsertPt, PRNG &RNG) {
   IRBuilder<> B(InsertPt);
-  Value *L = BO->getOperand(0);
-  Value *R = BO->getOperand(1);
-  Value *V = B.CreateBinOp(BO->getOpcode(), L, R, "cse.break");
-  if (auto *NewBO = dyn_cast<BinaryOperator>(V)) {
-    // Preserve nuw/nsw/exact flags so the clone is observationally identical
-    NewBO->copyIRFlags(BO);
+  Type  *Ty = BO->getType();
+  Value *L  = BO->getOperand(0);
+  Value *R  = BO->getOperand(1);
+
+  auto *M = ConstantInt::get(
+      Ty, randomForWidth(RNG, Ty->getIntegerBitWidth()));
+
+  switch (BO->getOpcode()) {
+  case Instruction::Add: {
+    Value *T = B.CreateAdd(B.CreateAdd(L, M, "cse.mask"), R, "cse.break");
+    return B.CreateSub(T, M, "cse.unmask");
   }
-  return V;
+  case Instruction::Sub: {
+    Value *T = B.CreateSub(B.CreateAdd(L, M, "cse.mask"), R, "cse.break");
+    return B.CreateSub(T, M, "cse.unmask");
+  }
+  case Instruction::Mul: {
+    Value *T = B.CreateMul(B.CreateAdd(L, M, "cse.mask"), R, "cse.break");
+    return B.CreateSub(T, B.CreateMul(M, R, "cse.corr"), "cse.unmask");
+  }
+  case Instruction::And: {
+    Value *T = B.CreateAnd(B.CreateXor(L, M, "cse.mask"), R, "cse.break");
+    return B.CreateXor(T, B.CreateAnd(M, R, "cse.corr"), "cse.unmask");
+  }
+  case Instruction::Or: {
+    Value *T  = B.CreateOr(B.CreateXor(L, M, "cse.mask"), R, "cse.break");
+    Value *Cr = B.CreateAnd(M, B.CreateNot(R, "cse.nb"), "cse.corr");
+    return B.CreateXor(T, Cr, "cse.unmask");
+  }
+  case Instruction::Xor: {
+    Value *T = B.CreateXor(B.CreateXor(L, M, "cse.mask"), R, "cse.break");
+    return B.CreateXor(T, M, "cse.unmask");
+  }
+  default:
+    // isEligible() admits only the six above.
+    llvm_unreachable("unhandled opcode in cloneAt");
+  }
 }
 
-static bool breakCSEInFunction(Function &F, PRNG & /*RNG*/) {
+static bool breakCSEInFunction(Function &F, PRNG &RNG) {
   bool Changed = false;
 
   // Snapshot eligible instructions first — modifying use-lists during
@@ -137,7 +193,7 @@ static bool breakCSEInFunction(Function &F, PRNG & /*RNG*/) {
       if (isa<PHINode>(UserI)) continue;
       // Don't cross funclet boundaries.
       if (UserI->getParent()->isEHPad()) continue;
-      Value *Clone = cloneAt(BO, UserI);
+      Value *Clone = cloneAt(BO, UserI, RNG);
       U->set(Clone);
       Changed = true;
     }
