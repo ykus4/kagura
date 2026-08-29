@@ -12,12 +12,20 @@ include_guard(GLOBAL)
 
 function(kagura_add_install_rules)
   include(GNUInstallDirs)
+  include(CMakePackageConfigHelpers)
+
+  set(KAGURA_CMAKE_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/Kagura)
 
   # The pass plugin. A loadable module is a LIBRARY on ELF/Mach-O; on Windows a
   # static plugin build produces an ARCHIVE instead, so list both destinations.
+  #
+  # Deliberately NOT in the export set. A MODULE library cannot be linked, so
+  # CMake refuses to export one, and even in the static-plugin build the plugin
+  # is not something a consumer links: it is handed to clang -fpass-plugin= or
+  # opt --load-pass-plugin= by path. KaguraConfig.cmake resolves that path into
+  # the Kagura_PLUGIN variable instead.
   if(TARGET KaguraObfuscator)
     install(TARGETS KaguraObfuscator
-            EXPORT  KaguraTargets
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -25,6 +33,19 @@ function(kagura_add_install_rules)
 
   # The runtime the obfuscated binary links against.
   if(TARGET kagura_runtime)
+    # The exported interface cannot name a build-tree path: an installed
+    # package is consumed from another machine, where ${PROJECT_SOURCE_DIR}
+    # does not exist. Without this split install(EXPORT) refuses the target
+    # outright ("INTERFACE_INCLUDE_DIRECTORIES ... which is prefixed in the
+    # source directory"), which is why there was no export set to begin with.
+    #
+    # Set here rather than in runtime/CMakeLists.txt so the whole export
+    # contract — what is installed, under what name, with which usage
+    # requirements — stays readable in one file.
+    set_property(TARGET kagura_runtime PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+      "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+
     install(TARGETS kagura_runtime
             EXPORT  KaguraTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
@@ -40,10 +61,16 @@ function(kagura_add_install_rules)
   #
   # game_protect.h is the consumer-facing interface (the Protected<T>
   # template). VM.h plus the .def it expands are the bytecode contract, which a
-  # consumer building the runtime from source needs. The podspec and Package.swift
-  # already draw the line in this same place.
+  # consumer building the runtime from source needs. runtime.h is the curated
+  # portable subset of runtime/internal.h — the tamper hook, the soft-response
+  # API and the kagura_check_* predicates — which docs/runtime.md and four
+  # cookbook pages tell readers to #include; until it was installed that
+  # instruction only worked from a source checkout. It is pure C99 and needs no
+  # LLVM header, which is the line this list draws. The podspec and
+  # Package.swift already draw it in the same place.
   install(FILES
             ${PROJECT_SOURCE_DIR}/include/kagura/game_protect.h
+            ${PROJECT_SOURCE_DIR}/include/kagura/runtime.h
             ${PROJECT_SOURCE_DIR}/include/kagura/VM.h
             ${PROJECT_SOURCE_DIR}/include/kagura/VMOpcodes.def
           DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/kagura)
@@ -54,4 +81,36 @@ function(kagura_add_install_rules)
             DESTINATION ${CMAKE_INSTALL_DATADIR}/kagura
             FILES_MATCHING PATTERN "*.json")
   endif()
+
+  # ---- The CMake package -----------------------------------------------------
+  #
+  # `EXPORT KaguraTargets` was already spelled on the install(TARGETS) calls
+  # above, but nothing ever installed the export set and there was no
+  # KaguraConfig.cmake or version file anywhere in the tree. CMake accepts an
+  # unused export set silently, so the release tarballs contained no CMake
+  # package at all and `find_package(Kagura)` could not work — the one thing
+  # the export name suggested was supported.
+  if(TARGET kagura_runtime)
+    install(EXPORT KaguraTargets
+            NAMESPACE Kagura::
+            DESTINATION ${KAGURA_CMAKE_DIR})
+  endif()
+
+  configure_package_config_file(
+    ${PROJECT_SOURCE_DIR}/cmake/KaguraConfig.cmake.in
+    ${PROJECT_BINARY_DIR}/KaguraConfig.cmake
+    INSTALL_DESTINATION ${KAGURA_CMAKE_DIR}
+    PATH_VARS CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_DATADIR)
+
+  # SameMajorVersion would promise ABI stability across 0.x releases, which
+  # this project does not offer while the VM bytecode contract is still moving.
+  write_basic_package_version_file(
+    ${PROJECT_BINARY_DIR}/KaguraConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMinorVersion)
+
+  install(FILES
+            ${PROJECT_BINARY_DIR}/KaguraConfig.cmake
+            ${PROJECT_BINARY_DIR}/KaguraConfigVersion.cmake
+          DESTINATION ${KAGURA_CMAKE_DIR})
 endfunction()

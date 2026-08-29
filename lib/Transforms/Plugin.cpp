@@ -180,14 +180,22 @@ llvm::PassPluginLibraryInfo getKaguraPluginInfo() {
                   if (opt::DWARFMode != "keep")
                     MPM.addPass(DWARFControlPass());
 
-                  // --- Symbol map output ---
-                  // Run last so all obfuscated names are already in place.
-                  if (opt::SymMap)
-                    MPM.addPass(SymbolMapPass());
-
                   // --- RTTI / vtable protection ---
+                  // Before the symbol map: VTP is the last pass that renames
+                  // anything (the _ZTS* type strings).
                   if (opt::VTP)
                     MPM.addPass(VTableProtectionPass());
+
+                  // --- Symbol map output ---
+                  // Run last so all obfuscated names are already in place.
+                  //
+                  // That comment was here before, and the code did the
+                  // opposite: SymbolMapPass ran ahead of VTableProtectionPass,
+                  // so the map never contained the VTP renames and could not
+                  // symbolicate a crash in the code it is emitted for. The
+                  // documented pipeline in docs/pass-order.md had it right.
+                  if (opt::SymMap)
+                    MPM.addPass(SymbolMapPass());
 
                   // --- Audit log ---
                   // Run after everything else so all markObfuscated() calls

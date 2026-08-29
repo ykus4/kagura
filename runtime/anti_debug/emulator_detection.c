@@ -161,23 +161,35 @@ static int kagura_check_android_emulator(void) { return 0; }
  * (ns / tsc_delta) is much larger than on bare metal. */
 static int kagura_timing_check(void) {
     struct timespec t0, t1;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
+    if (clock_gettime(CLOCK_MONOTONIC, &t0) != 0) return 0;
 
-    volatile uint64_t tsc0, tsc1;
-    __asm__ volatile("rdtsc" : "=A"(tsc0));
+    /* __builtin_ia32_rdtsc(), not inline asm with the "=A" constraint.  On
+     * x86-64 "=A" does not mean "EDX:EAX" the way it does on i386 - it means
+     * RAX alone - so the upper 32 bits RDTSC leaves in EDX were discarded and
+     * the "64-bit" counter was really a 32-bit one that wrapped every couple
+     * of seconds.  A wrap between the two reads produced a nonsense delta. */
+    uint64_t tsc0 = __builtin_ia32_rdtsc();
     /* Tight loop */
     for (volatile int i = 0; i < 1000; ++i) {}
-    __asm__ volatile("rdtsc" : "=A"(tsc1));
+    uint64_t tsc1 = __builtin_ia32_rdtsc();
 
-    clock_gettime(CLOCK_MONOTONIC, &t1);
+    if (clock_gettime(CLOCK_MONOTONIC, &t1) != 0) return 0;
 
-    uint64_t elapsed_ns = (uint64_t)(t1.tv_sec  - t0.tv_sec)  * 1000000000ULL
-                        + (uint64_t)(t1.tv_nsec - t0.tv_nsec);
-    uint64_t tsc_delta  = tsc1 - tsc0;
+    /* The elapsed time must be accumulated in *signed* nanoseconds across both
+     * fields.  Computing `(uint64_t)(t1.tv_nsec - t0.tv_nsec)` separately
+     * underflows every time the pair of reads straddles a second boundary
+     * - roughly a 1-in-1000 chance per call on a real device - giving an
+     * elapsed_ns of ~1.8e19.  The ratio test below then passed unconditionally
+     * and kagura_assert_real_device() killed a perfectly real phone. */
+    int64_t elapsed_ns = (int64_t)(t1.tv_sec - t0.tv_sec) * INT64_C(1000000000)
+                       + ((int64_t)t1.tv_nsec - (int64_t)t0.tv_nsec);
+    if (elapsed_ns <= 0) return 0;   /* clock went backwards or did not move */
 
-    if (tsc_delta == 0) return 0;
+    if (tsc1 <= tsc0) return 0;      /* TSC wrapped, was reset, or stood still */
+    uint64_t tsc_delta = tsc1 - tsc0;
+
     /* If ns/tick > 10, TSC is likely virtualised / very slow */
-    return (elapsed_ns / tsc_delta) > 10u ? 1 : 0;
+    return ((uint64_t)elapsed_ns / tsc_delta) > 10u ? 1 : 0;
 }
 #else
 static int kagura_timing_check(void) { return 0; }

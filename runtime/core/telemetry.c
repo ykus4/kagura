@@ -23,7 +23,7 @@
 
 #include "../internal.h"
 
-__attribute__((weak))
+KAGURA_WEAK
 void kagura_telemetry_event(uint32_t event_id) {
     (void)event_id;
 }

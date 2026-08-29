@@ -46,6 +46,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassInstrumentation.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Passes/PassBuilder.h"
@@ -244,7 +245,20 @@ int main(int argc, char **argv) {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
-  ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(OL);
+  // buildPerModuleDefaultPipeline asserts `Level != O0` — O0 has its own
+  // builder. Without this branch, `kagura-opt -O0` aborted, which took out the
+  // whole -kagura-o0-protect path (Plugin.cpp installs the O0 subset on the
+  // OptimizerLast extension point) from the tool documented as the supported
+  // Windows entry point, where -fpass-plugin is unavailable.
+  ModulePassManager MPM = (OL == OptimizationLevel::O0)
+                              ? PB.buildO0DefaultPipeline(OL)
+                              : PB.buildPerModuleDefaultPipeline(OL);
+
+  // Verify what we produced. This tool's entire job is rewriting IR; letting
+  // malformed output reach the backend turns a pass bug into a mystery
+  // crash in the assembler.
+  MPM.addPass(VerifierPass());
+
   MPM.run(*M, MAM);
 
   // Write output

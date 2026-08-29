@@ -1,33 +1,54 @@
 # ランタイムライブラリ
 
-一部のパスは `libkagura_runtime.a` (`build/runtime/libkagura_runtime.a` でビルド) のリンクが必要です:
+一部のパスは、自分では定義しないシンボルへの呼び出しを生成します。そうしたターゲットは `libkagura_runtime.a` (`build/runtime/libkagura_runtime.a` でビルド) のリンクが必要です:
 
-| パス | 必要シンボル |
-|:-----|:-------------|
-| StringEncryptionAES | `kagura_aes128_ctr_decrypt`, `kagura_zero_buf` |
-| VMObfuscation | `kagura_vm_execute` |
-| AntiDebug | `kagura_anti_debug_init`, `kagura_check_hooks`, `kagura_check_breakpoints`, `kagura_check_emulator` |
-| AntiTamper | `kagura_self_check`, `kagura_tamper_detected` |
-| CallIndirection | `dlsym` (システム) |
-| PointerAuth | `kagura_random_u64` |
+| パス | フラグ | 呼び出すが定義しないシンボル |
+|:-----|:------|:---------------------------|
+| StringEncryptionAES | `-kagura-str-aes` | `kagura_aes128_ctr_decrypt`, `kagura_check_blob_integrity` |
+| VMObfuscation | `-kagura-vm` | `kagura_vm_execute` |
+| AntiDebug | `-kagura-anti-debug` | `kagura_check_tracer_pid`, `kagura_check_inline_hooks`, `kagura_check_got_hooks`, `kagura_check_sw_breakpoints`, `kagura_check_hw_breakpoints`, `kagura_check_emulator` |
+| AntiTamper | `-kagura-tamper` | `kagura_self_check`, `kagura_tamper_detected`, `kagura_runtime_hash_check` |
+| BasicBlockChecksum | `-kagura-bbcheck` | `kagura_bb_check`, `kagura_on_tamper_detected` |
+| Telemetry | `-kagura-telemetry` | `kagura_telemetry_event` |
+| CallIndirection | `-kagura-ci` | `kagura_rtld_default_handle`、およびシステムの `dlsym` |
+| PointerAuth | `-kagura-pac` | `kagura_random_u64` |
+| JNIObfuscation | `-kagura-jni` | `kagura_jni_get_env`, `kagura_jni_find_class`, `kagura_jni_register_native` |
+| ObjCObfuscation | `-kagura-objc` | `kagura_objc_register_remap` |
+
+この表に載っていそうで載っていない名前が 2 つあります。パスが **定義する** 側であって、外部から取り込むわけではないからです: `kagura_anti_debug_init`（AntiDebug が生成するモジュールコンストラクタ）と `kagura_on_tamper_detected`（AntiDebug が `abort()` を呼ぶ弱いデフォルト定義を出力します。独自の応答にしたい場合はこれをオーバーライドしてください）。それ以外のパス — 文字列系・制御フロー系・データ系 — は自己完結したコードを生成し、ランタイムを一切必要としません。
 
 ```bash
 clang your_file.c build/runtime/libkagura_runtime.a -o your_file
 ```
 
-## 直接呼び出し可能なアンチタンパー API
+## 直接呼び出し可能な API
 
-`include/kagura/runtime.h` はパス注入スキャフォールディングの外でも呼び出せる整合性チェックを公開しています:
+`include/kagura/runtime.h` はランタイムの公開サブセットです。自分で呼べる検出器、オーバーライドできるフック、保護付き値型を提供します。
 
 ```c
 #include "kagura/runtime.h"
 
-kagura_self_check();                   // Mach-O / ELF 整合性 + jailbreak/root
-kagura_check_loaded_libraries();       // 怪しい dylib / .so スキャン (Frida gadget 等)
-kagura_run_review_risk_check();        // App Store / Play Store 提出前スキャン
+if (kagura_suspicious_lib_loaded())   { /* Frida gadget, Substrate, … */ }
+if (kagura_check_tracer_pid())        { /* ptrace / デバッガアタッチ */ }
+if (kagura_check_sw_breakpoints())    { /* コードに int3 / BRK が書き込まれた */ }
+if (kagura_jailbreak_detected())      { /* Apple ターゲット */ }
+if (kagura_magisk_present())          { /* Android ターゲット */ }
 ```
 
 モバイルアプリの `main()` や Windows の `DllMain` から呼び出すと、パス注入の初期化コードを経由せずに同じ防御が得られます — チェックの発火タイミングを明示的に制御したい場合に便利です。
+
+### 述語と応答
+
+2 つの形があり、互換ではありません:
+
+| 形 | 戻り値 | 挙動 |
+|:---|:------|:-----|
+| `int kagura_check_*(void)` | 非ゼロ == 検出 | 報告するだけ。それ以外は何もしません。 |
+| `void kagura_*_check(void)` | なし | 述語を実行し、検出時に tamper フックを呼びます。 |
+
+`kagura_self_check()`、`kagura_check_hooks()`、`kagura_check_breakpoints()` は名前に反して後者です。したがって `if (kagura_self_check() != 0)` はこのヘッダに対してコンパイルできません。呼び出し側が自前で `extern int` 宣言を書いていたときだけ通っていたように見えていただけで、実際にはゴミの入ったレジスタで分岐していました。`runtime/ios/device_attest.c` には同じ失敗が 4 つのシンボルで同時に起きた記録が残っており、このヘッダが存在する理由そのものです。
+
+これらを手書きで宣言せず、必ず `#include "kagura/runtime.h"` してください。
 
 ## プラットフォーム認証 API
 

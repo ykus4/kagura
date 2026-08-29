@@ -973,7 +973,7 @@ PreservedAnalyses VMObfuscationPass::run(Function &F,
   if (!Program)
     return PreservedAnalyses::all();
 
-  buildTrampoline(F, *Program, getModulePRNG());
+  buildTrampoline(F, *Program, getModulePRNG(*F.getParent()));
   markObfuscated(F, "vm");
   return PreservedAnalyses::none();
 }

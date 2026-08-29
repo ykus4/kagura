@@ -3,7 +3,7 @@
  * Magisk and Zygisk detection.
  * Xposed / LSPosed detection.
  *
- * These checks complement the basic root detection in jailbreak_detection.c
+ * These checks complement the basic root detection in android/root_paths.c
  * with framework-specific indicators that survive Magisk Hide / DenyList and
  * LSPosed's module loading.
  *
@@ -51,12 +51,18 @@
 /* Shared probes from core/pathprobe.c and core/procfs.c. */
 #define path_exists(p) kagura_path_exists_hardened(p)
 
-/* Single-fragment convenience wrapper over kaguramaps_contain(). */
+/* Single-fragment convenience wrapper over kagura_maps_contain().
+ *
+ * The name is spelled out from internal.h deliberately: this used to call
+ * `kaguramaps_contain`, a symbol that has never existed.  Everything below the
+ * `#ifdef __ANDROID__` is invisible to the desktop-Linux build that CI runs, so
+ * the implicit declaration - an error since C99 - only surfaced when someone
+ * built for a real device. */
 static int maps_contain(const char *fragment) {
     const char *patterns[2];
     patterns[0] = fragment;
     patterns[1] = NULL;
-    return kaguramaps_contain(patterns);
+    return kagura_maps_contain(patterns);
 }
 
 /* -------------------------------------------------------------------------

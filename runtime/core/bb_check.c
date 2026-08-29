@@ -54,7 +54,7 @@
 
 #include "../internal.h"
 
-__attribute__((weak))
+KAGURA_WEAK
 int kagura_bb_check(uint32_t block_id, uint32_t expected) {
     (void)block_id;
     (void)expected;

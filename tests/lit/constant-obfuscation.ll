@@ -1,40 +1,51 @@
-; RUN: %opt -load-pass-plugin=%kagura_plugin -kagura-seed=29 -kagura-co \
-; RUN:     -passes='kagura-co,verify' -S %s | %FileCheck %s
+; RUN: %opt -passes=verify -S %s -o %t.plain.ll
+; RUN: %opt -load-pass-plugin=%kagura_plugin -kagura-seed=29 \
+; RUN:     -passes='kagura-co,verify' -S %s -o %t.co.ll
+; RUN: not diff %t.plain.ll %t.co.ll
+; RUN: %FileCheck %s --input-file=%t.co.ll
 
 ; Constant obfuscation replaces integer constant operands with MBA identities
-; that evaluate to the same value.  Only ~30% of constants are rewritten, so the
-; seed is pinned to make the choice deterministic; with seed 29 all three
-; constants below are rewritten.
+; that evaluate to the same value.
 ;
-; Regression guard: the identities are built from a constant operand, so a
-; constant-folding IRBuilder collapses them straight back to the original
-; constant and the pass becomes a silent no-op.  The CHECK-NOT lines below fire
-; again if that ever regresses.
+; Regression guard: every identity is built from a constant operand, so a
+; constant-folding IRBuilder collapses it straight back to the original
+; constant and the pass becomes a silent no-op that still reports success.
+; The `co.`-prefixed values below are the evidence that the expression was
+; emitted rather than folded — if the pass regresses, there are none of them
+; and `not diff` fails as well.
+;
+; What this file does NOT do any more is name which identity was chosen for
+; which constant.  The pass picks one of four at random and rewrites a constant
+; with probability 30 %, so pinning that made the test a statement about the
+; PRNG draw sequence: it broke when the PRNG moved to per-module seeding, with
+; nothing about the pass having changed.  Sixteen candidate constants make
+; "not one of them was rewritten" a 0.7^16 ≈ 0.3 % event; the seed is pinned
+; only so a failure is reproducible.
 
-; CHECK: define i32 @get_magic
-; The `((V | ~V) & V)` identity for 42.
-; CHECK: %[[NOT:[a-z0-9.]+]] = xor i32 42, -1
-; CHECK: %[[OR:[a-z0-9.]+]] = or i32 42, %[[NOT]]
-; CHECK: %[[AND:[a-z0-9.]+]] = and i32 %[[OR]], 42
-; CHECK: ret i32 %[[AND]]
+; CHECK-DAG: define i32 @get_magic
+; CHECK-DAG: define i32 @use_constants
+; CHECK-DAG: %co.
 
 define i32 @get_magic() {
-; CHECK-NOT: ret i32 42
   ret i32 42
 }
 
 define i32 @use_constants(i32 %x) {
-  ; The `(V + R) - R` identity for 100 ...
-  ; CHECK: %[[A1:[a-z0-9.]+]] = add i32 100, [[R:-?[0-9]+]]
-  ; CHECK: %[[A2:[a-z0-9.]+]] = sub i32 %[[A1]], [[R]]
-  ; CHECK: add i32 %x, %[[A2]]
-  ; CHECK-NOT: add i32 %x, 100
   %a = add i32 %x, 100
-  ; ... and the `(V ^ R) ^ R` identity for 7.
-  ; CHECK: %[[X1:[a-z0-9.]+]] = xor i32 7, [[K:-?[0-9]+]]
-  ; CHECK: %[[X2:[a-z0-9.]+]] = xor i32 %[[X1]], [[K]]
-  ; CHECK: mul i32 %{{.*}}, %[[X2]]
-  ; CHECK-NOT: mul i32 %a, 7
   %b = mul i32 %a, 7
-  ret i32 %b
+  %c = xor i32 %b, 3735928559
+  %d = or  i32 %c, 61680
+  %e = and i32 %d, 2004318071
+  %f = sub i32 %e, 271828
+  %g = add i32 %f, 314159
+  %h = mul i32 %g, 11
+  %i = xor i32 %h, 22
+  %j = or  i32 %i, 33
+  %k = and i32 %j, 44
+  %l = sub i32 %k, 55
+  %m = add i32 %l, 66
+  %n = mul i32 %m, 77
+  %o = xor i32 %n, 88
+  %p = or  i32 %o, 99
+  ret i32 %p
 }

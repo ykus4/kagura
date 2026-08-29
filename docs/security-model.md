@@ -27,7 +27,7 @@ or partially covered.
 |:---------|:---------------------|:----------------|
 | **Information Disclosure** | Static binary analysis (strings, IDA, Ghidra, Binary Ninja) | ✅ Strong — string encryption, CFG flattening, MBA, symbol hiding, RTTI obfuscation, DWARF strip |
 | **Information Disclosure** | Live memory inspection (Cheat Engine, GameGuardian, /proc/maps) | ✅ Strong — MVO/PE encrypt values at every store, `Protected<T>` adds shadow-copy detection |
-| **Tampering** | Binary patching (NOP-ing checks, replacing instructions) | ✅ Medium — per-BB opcode checksums (`kagura-bbcheck`) abort on modification |
+| **Tampering** | Binary patching (NOP-ing checks, replacing instructions) | ⚠️ Partial — `kagura-tamper` hashes whole functions at startup. `kagura-bbcheck` is scaffolding only: it emits per-block call sites, but the shipped `kagura_bb_check` always returns "intact" — see [below](#binary-patching-what-kagura-bbcheck-actually-does) |
 | **Tampering** | Loader hooking (Frida, Substrate, fishhook) | ✅ Medium — runtime detection probes for hook frameworks, suspicious dylib / .so scan |
 | **Tampering** | Debugger attach (ptrace, lldb, WinDbg) | ✅ Medium — `kagura-anti-debug` covers ptrace, IsDebuggerPresent, PEB heap flags, Frida ports |
 | **Information Disclosure** | Symbolic / concolic execution (angr, KLEE, S2E) | ⚠️ Partial — `kagura-fla` + `kagura-bcf` + `kagura-co` raise path explosion; see `tests/symbolic_exec/` for measurements |
@@ -45,6 +45,27 @@ or partially covered.
 ## What Kagura does **not** protect
 
 Be explicit about the boundaries — these are real and need other controls.
+
+### Binary patching: what `kagura-bbcheck` actually does
+`-kagura-bbcheck` emits a `kagura_bb_check(block_id, expected)` call at the top
+of each basic block and branches to the tamper hook when it returns zero. The
+shipped `kagura_bb_check` (`runtime/core/bb_check.c`) is a **weak,
+always-passing stub**: it ignores both arguments and returns "intact". As
+shipped, the pass detects no patching at all — you get the call sites and the
+code-size cost, and nothing else.
+
+The stub is honest rather than unfinished. `expected` is a hash of the block's
+**LLVM IR opcodes**, computed before instruction selection, and IR opcodes have
+no representation in the emitted binary; `block_id` restarts at 1 in every
+function, so it is not a unique key. There is nothing at run time to verify
+against. Making the pass real requires emitting post-codegen byte ranges into a
+table the runtime can walk, which is not implemented.
+
+For anti-patching today, use **`-kagura-tamper`**: it hashes loaded functions
+and calls `kagura_runtime_hash_check` / `kagura_self_check`, which do work.
+Note the assumption in [Pass order is
+preserved](#2-the-pass-order-is-preserved) — checksums are taken at a specific
+point in the pipeline.
 
 ### Plaintext server-side secrets
 Anything decrypted at runtime is plaintext **in registers and memory** for the
@@ -100,9 +121,16 @@ to confirm a fixed seed still produces identical IR.
 
 ### 3. The runtime library is linked
 `kagura-str-aes`, `kagura-anti-debug`, `kagura-tamper`, `kagura-pac`,
-`kagura-vm`, `kagura-bbcheck` all need symbols in `libkagura_runtime.a`. A
-missing link results in undefined symbols at load time — surfaces the problem
-early, but also means missing the runtime means missing the protection.
+`kagura-vm`, `kagura-ci`, `kagura-bbcheck`, `kagura-telemetry`, `kagura-objc`
+and `kagura-jni` all call symbols they do not define — see [Runtime
+Library](runtime.md) for the exact matrix. A missing link results in undefined
+symbols at load time, which surfaces the problem early, but also means missing
+the runtime means missing the protection.
+
+Two of those symbols are weak no-ops on purpose (`kagura_bb_check`,
+`kagura_telemetry_event`), so those two passes link *and* do nothing until you
+supply an implementation. Linking successfully is not evidence that a
+protection is active.
 
 ### 4. Reproducibility is honored
 Setting `-kagura-seed=0` (entropy default) produces a different binary each

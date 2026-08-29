@@ -127,7 +127,25 @@ static Function *buildAESDecryptStub(Module &M,
 
 static Value *emitAESDecryptCall(IRBuilder<> &B, Function *Stub,
                                  ArrayType *OutArrTy) {
-  auto *OutBuf = B.CreateAlloca(OutArrTy, nullptr, "kagura.aesbuf");
+  // The buffer goes in the entry block; only the call goes at the use site.
+  //
+  // Built where B points, a use inside a loop allocated a fresh frame slot on
+  // every iteration. Only entry-block allocas are static — LLVM gives those a
+  // fixed frame offset — so a non-entry one in a loop grows the stack until
+  // the function returns. A string decrypted inside a hot loop was a stack
+  // overflow waiting for enough iterations.
+  //
+  // Each use site still gets its own buffer, which is what the caller's
+  // comment about avoiding a shared static buffer is protecting. What changes
+  // is that a use in a loop now reuses one slot across iterations rather than
+  // getting a fresh one each time, so a decrypted pointer captured in one
+  // iteration and read in a later one would see the newer contents. That is
+  // the standard trade-off for hoisting, and the alternative is unbounded
+  // stack growth.
+  Function *F = B.GetInsertBlock()->getParent();
+  IRBuilder<> EB(&*F->getEntryBlock().getFirstInsertionPt());
+  auto *OutBuf = EB.CreateAlloca(OutArrTy, nullptr, "kagura.aesbuf");
+
   auto *PtrTy = PointerType::getUnqual(B.getContext());
   Value *OutPtr = B.CreateBitCast(OutBuf, PtrTy);
   return B.CreateCall(Stub, {OutPtr}, "aesdec");
@@ -144,7 +162,7 @@ PreservedAnalyses StringEncryptionAESPass::run(Module &M,
     return PreservedAnalyses::all();
 
   LLVMContext &Ctx = M.getContext();
-  auto &RNG        = getModulePRNG();
+  auto &RNG        = getModulePRNG(M);
   bool Changed     = false;
 
   FunctionCallee RuntimeDecrypt   = getOrDeclareRuntimeDecrypt(M);
@@ -163,8 +181,8 @@ PreservedAnalyses StringEncryptionAESPass::run(Module &M,
     // Generate random key (16 bytes) and nonce (8 bytes)
     uint8_t Key[16];
     uint8_t Nonce[8];
-    fillRandomBytes(Key, 16);
-    fillRandomBytes(Nonce, 8);
+    fillRandomBytes(RNG, Key, 16);
+    fillRandomBytes(RNG, Nonce, 8);
 
     // AES-128-CTR encrypt at compile time
     const auto *DataPtr = reinterpret_cast<const uint8_t *>(Raw.data());

@@ -133,8 +133,19 @@ static std::vector<EligibleGlobal> collectEligibleGlobals(Module &M) {
 // ---------------------------------------------------------------------------
 
 /// Return the APInt value held by a constant integer element at index Idx of
-/// either a ConstantDataArray or ConstantArray.  Returns nullopt if unknown.
-static APInt getArrayElement(Constant *Init, uint64_t Idx, Type *ElemTy) {
+/// either a ConstantDataArray or ConstantArray, or nullopt if the element is
+/// not a plain constant integer.
+///
+/// The nullopt matters. This used to fall back to APInt::getZero() with a
+/// comment saying "key ^ 0 = key, still encrypts" — true, and beside the
+/// point: the *plaintext* was replaced by zero. A ConstantArray element that
+/// is an undef, a poison, or a relocatable expression rather than a
+/// ConstantInt had its real value discarded at compile time, and every load
+/// of it then decrypted cleanly to 0. Silent data corruption, in the pass
+/// whose whole job is to be value-preserving. The caller declines the global
+/// now instead of encrypting something it cannot read.
+static std::optional<APInt> getArrayElement(Constant *Init, uint64_t Idx,
+                                            Type *ElemTy) {
   if (auto *CDA = dyn_cast<ConstantDataArray>(Init)) {
     // ConstantDataArray stores raw data; use getElementAsInteger.
     return APInt(ElemTy->getIntegerBitWidth(),
@@ -144,8 +155,7 @@ static APInt getArrayElement(Constant *Init, uint64_t Idx, Type *ElemTy) {
     if (auto *CI = dyn_cast<ConstantInt>(CA->getOperand(Idx)))
       return CI->getValue();
   }
-  // Fallback: return zero (will result in key ^ 0 = key, still encrypts).
-  return APInt::getZero(ElemTy->getIntegerBitWidth());
+  return std::nullopt;
 }
 
 // ---------------------------------------------------------------------------
@@ -309,10 +319,22 @@ static bool encryptArrayGlobal(GlobalVariable *GV, PRNG &RNG) {
   Constant *OldInit = GV->getInitializer();
   std::vector<Constant *> EncElems;
   EncElems.reserve(N);
+  // The index is mixed into the key, so it has to be narrowed to the *element*
+  // width, not used raw: a [512 x i8] global asserts at I == 256 otherwise.
+  // Encryption and decryption both go through elemKey(), so the two cannot
+  // disagree about the narrowing.
+  auto elemKey = [&](uint64_t Idx) {
+    return BaseKey ^ APInt(Bits, Idx & maskForWidth(Bits));
+  };
+
   for (uint64_t I = 0; I < N; ++I) {
-    APInt ElemKey   = BaseKey ^ APInt(Bits, I);
-    APInt PlainVal  = getArrayElement(OldInit, I, ElemTy);
-    APInt EncVal    = PlainVal ^ ElemKey;
+    std::optional<APInt> PlainVal = getArrayElement(OldInit, I, ElemTy);
+    // An element whose value we cannot read is an element we cannot encrypt
+    // without losing it. Leave the whole global alone; nothing has been
+    // mutated yet at this point.
+    if (!PlainVal)
+      return false;
+    APInt EncVal = *PlainVal ^ elemKey(I);
     EncElems.push_back(ConstantInt::get(ElemTy, EncVal));
   }
   auto *NewInit = ConstantArray::get(ArrTy, EncElems);
@@ -321,7 +343,7 @@ static bool encryptArrayGlobal(GlobalVariable *GV, PRNG &RNG) {
 
   // At each load site for element[i], inject XOR with (BaseKey ^ i).
   for (auto &AL : Loads) {
-    APInt ElemKey  = BaseKey ^ APInt(Bits, AL.ElemIdx);
+    APInt ElemKey  = elemKey(AL.ElemIdx);
     auto *KeyConst = ConstantInt::get(ElemTy, ElemKey);
     IRBuilder<> B(AL.LI->getNextNode());
     auto *Decrypted = B.CreateXor(AL.LI, KeyConst,
@@ -344,7 +366,7 @@ PreservedAnalyses GlobalEncryptionPass::run(Module &M,
   if (Eligible.empty())
     return PreservedAnalyses::all();
 
-  PRNG &RNG    = getModulePRNG();
+  PRNG &RNG    = getModulePRNG(M);
   bool Changed = false;
 
   for (auto &EG : Eligible) {

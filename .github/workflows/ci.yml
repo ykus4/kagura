@@ -47,6 +47,10 @@ jobs:
       - name: Install lit
         run: python3 -m pip install --break-system-packages --quiet lit
 
+      # KAGURA_REQUIRE_LIT turns "lit or FileCheck is missing" from a STATUS
+      # line into a configure error. This job installed lit above and then
+      # never checked, so a pip failure would have dropped all 32 lit tests
+      # from the only build with assertions compiled in — silently, and green.
       - name: Configure (Debug — assertions on)
         run: |
           cmake -B build-assert \
@@ -55,11 +59,22 @@ jobs:
             -DLLVM_DIR="$LLVM_PREFIX/lib/cmake/llvm" \
             -DCMAKE_C_COMPILER="$LLVM_PREFIX/bin/clang" \
             -DCMAKE_CXX_COMPILER="$LLVM_PREFIX/bin/clang++" \
-            -DKAGURA_BUILD_TESTS=ON
+            -DKAGURA_BUILD_TESTS=ON \
+            -DKAGURA_REQUIRE_LIT=ON
 
+      # The `test -f` is the point of this step as much as the grep is.
+      # flags.make only exists under the Makefile generator; if the generator,
+      # the target or the directory name ever changes, grep exits 2, the `if`
+      # is false, and the step reports success — which is precisely the failure
+      # this job exists to prevent (see the comment at the top of the job).
       - name: Confirm assertions really are enabled
         run: |
-          if grep -q -- '-DNDEBUG' build-assert/lib/Transforms/CMakeFiles/KaguraObfuscator.dir/flags.make; then
+          FLAGS=build-assert/lib/Transforms/CMakeFiles/KaguraObfuscator.dir/flags.make
+          if [ ! -f "$FLAGS" ]; then
+            echo "::error::$FLAGS does not exist — this check cannot tell whether NDEBUG is set"
+            exit 1
+          fi
+          if grep -q -- '-DNDEBUG' "$FLAGS"; then
             echo "::error::NDEBUG is set — this job would not catch assertion failures"
             exit 1
           fi
@@ -100,9 +115,11 @@ jobs:
           echo "LLVM_PREFIX=$(brew --prefix llvm@${{ matrix.llvm }})" >> $GITHUB_ENV
 
       # lit drives the FileCheck suite. It is not part of the Homebrew LLVM
-      # bottle, and without it tests/CMakeLists.txt silently skips 29 tests
-      # with a STATUS message while the job stays green — which is how those
-      # tests went years without ever running.
+      # bottle, and without it tests/CMakeLists.txt silently skips the whole
+      # suite with a STATUS message while the job stays green — which is how
+      # those tests went years without ever running. KAGURA_REQUIRE_LIT below
+      # turns that skip into a configure error; it replaces a `ctest -N | grep`
+      # guard that only this job had.
       - name: Install lit
         run: |
           python3 -m pip install --break-system-packages --quiet lit
@@ -117,16 +134,8 @@ jobs:
             -DCMAKE_C_COMPILER="$LLVM_PREFIX/bin/clang" \
             -DCMAKE_CXX_COMPILER="$LLVM_PREFIX/bin/clang++" \
             -DKAGURA_BUILD_TESTS=ON \
-            -DKAGURA_BITCODE_TOOLS=OFF
-
-      # Fail rather than skip: a silently-skipped suite is worse than no suite.
-      # If lit or FileCheck goes missing, tests/CMakeLists.txt just prints a
-      # STATUS line and moves on, so the only reliable signal is whether the
-      # test got registered at all.
-      - name: Verify the lit suite is wired up
-        run: |
-          ctest --test-dir build -N | grep -q 'lit-filecheck' \
-            || { echo "::error::lit-filecheck was not registered — lit or FileCheck missing"; exit 1; }
+            -DKAGURA_BITCODE_TOOLS=OFF \
+            -DKAGURA_REQUIRE_LIT=ON
 
       - name: Build
         run: cmake --build build -- -j$(sysctl -n hw.logicalcpu)
@@ -227,6 +236,80 @@ jobs:
           }
           Write-Host "kagura-opt OK — flattening dispatcher present"
 
+  # ---- Linux, loadable module ---------------------------------------------
+  # Every ctest-running job in this file was either macOS or the static-plugin
+  # job below, and the static-plugin job could only ever register a handful of
+  # kagura-opt smoke tests, so Linux effectively had no test coverage at all on
+  # a project that advertises iOS/Android/macOS/Windows/Linux/Wasm. This job is
+  # the plain Linux configuration — loadable module, the same one a Linux
+  # developer gets from `cmake -B build` — running the whole suite: pass tests,
+  # link tests, the regression corpus, the integration tests and lit.
+  #
+  # LLVM 19 from apt.llvm.org, matching the static-plugin job below.
+  # llvm-19-tools is what carries FileCheck; llvm-19-dev alone does not.
+  linux-loadable:
+    name: Build & Test (Linux, loadable module)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 19
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          sudo add-apt-repository -y "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main"
+          sudo apt-get update
+          sudo apt-get install -y llvm-19-dev llvm-19-tools clang-19
+
+      - name: Install lit
+        run: |
+          python3 -m pip install --quiet lit
+          lit --version
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR=/usr/lib/llvm-19/lib/cmake/llvm \
+            -DCMAKE_C_COMPILER=clang-19 \
+            -DCMAKE_CXX_COMPILER=clang++-19 \
+            -DKAGURA_BUILD_TESTS=ON \
+            -DKAGURA_REQUIRE_LIT=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      # After the build, not before it: this asks whether the artefact exists,
+      # and before `cmake --build` the answer is trivially no.
+      - name: Confirm a loadable module really was built
+        run: |
+          test -f build/lib/Transforms/KaguraObfuscator.so \
+            || { echo "::error::no loadable module — this job would duplicate static-plugin"; exit 1; }
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -j$(nproc)
+
+      # The shipped policy profiles are the files the integrations load by
+      # path, and an unrecognised key in one of them is ignored: the profile
+      # silently stops enabling a pass and the build still succeeds.
+      # -kagura-config-strict turns that into an error, so this is the check
+      # that integration/profiles/*.json still says what it means.
+      - name: Shipped profiles load cleanly (-kagura-config-strict)
+        run: |
+          cat > /tmp/probe.c <<'EOF'
+          #include <stdio.h>
+          int main(void) { printf("kagura\n"); return 0; }
+          EOF
+          /usr/lib/llvm-19/bin/clang -O1 -emit-llvm -S -o /tmp/probe.ll /tmp/probe.c
+          for p in integration/profiles/*.json; do
+            echo "--- $p"
+            /usr/lib/llvm-19/bin/opt \
+              -load-pass-plugin=build/lib/Transforms/KaguraObfuscator.so \
+              -kagura-config="$p" -kagura-config-strict \
+              -passes='default<O1>' -S /tmp/probe.ll -o /dev/null \
+              || { echo "::error::$p is rejected by -kagura-config-strict"; exit 1; }
+          done
+
   # ---- Static-plugin linkage (Windows path, exercised on Linux) ------------
   # The Windows job above is the only place the static-plugin path runs for
   # real, and it is the slowest to iterate on.  KAGURA_FORCE_STATIC_PLUGIN
@@ -234,6 +317,16 @@ jobs:
   # through kagura-opt's getKaguraPluginInfo() call instead of a loadable
   # module — on a platform where loadable modules would otherwise be used.
   # A break in the Windows linkage shows up here first, and cheaply.
+  #
+  # It used to be the only ctest-running Linux job, and tests/CMakeLists.txt
+  # returned early for this configuration, so it registered 4 tests. It now
+  # registers the pass, link and integration suites too (driven through
+  # kagura-opt); the lit suite and the regression corpus are reported as
+  # skipped, because both need something this linkage cannot provide. The full
+  # Linux suite is the linux-loadable job above.
+  #
+  # KAGURA_REQUIRE_LIT is deliberately not set here: the lit suite is skipped
+  # for a structural reason, not a missing tool.
   static-plugin:
     name: Build & Test (static plugin linkage)
     runs-on: ubuntu-22.04

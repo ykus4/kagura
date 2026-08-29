@@ -51,6 +51,23 @@ bool shouldObfuscate(llvm::Function &F, llvm::StringRef PassAttr,
 /// by later passes. This recognises every prefix kagura actually emits.
 bool isKaguraSymbol(llvm::StringRef Name);
 
+/// Mark IR that kagura generated, so later passes can leave it alone.
+///
+/// Six passes tested `BB.getName().starts_with("kagura.")` for this. Clang
+/// enables -fdiscard-value-names by default whenever LLVM is built without
+/// assertions — which is every shipping toolchain — and local value and block
+/// names are then empty strings. All six guards were dead in exactly the
+/// configuration users compile in, so each pass reprocessed the control-flow
+/// dispatcher it was supposed to skip. Metadata survives name discarding.
+///
+/// The block form marks every instruction present at the time of the call;
+/// isGenerated() answers true if any instruction in the block carries the
+/// marker, so instructions added later do not have to be marked too.
+void markGenerated(llvm::Instruction &I);
+void markGenerated(llvm::BasicBlock &BB);
+bool isGenerated(const llvm::Instruction &I);
+bool isGenerated(const llvm::BasicBlock &BB);
+
 // ---- Integer width helpers ----
 
 /// All-ones mask for an N-bit value, avoiding the UB of `1ULL << 64`.
@@ -128,8 +145,24 @@ private:
   uint64_t State;
 };
 
-/// Returns the module-level PRNG (seeded from -kagura-seed or system entropy).
-PRNG &getModulePRNG();
+/// Returns the PRNG for M, seeded from -kagura-seed / -kagura-build-id mixed
+/// with M's module identifier.
+///
+/// The module argument is not decoration. This used to be a process-global
+/// instance shared by every module that passed through the process, each one
+/// continuing the previous one's draw sequence. ThinLTO's parallel in-process
+/// backends raced on it, and any embedder driving several modules through one
+/// pipeline got keys that depended on compilation order.
+PRNG &getModulePRNG(const llvm::Module &M);
+
+/// A random N-bit value, already narrowed so it can be handed to APInt or
+/// ConstantInt without asserting.
+///
+/// maskForWidth() above exists for this and three call sites use it; four
+/// others kept writing `APInt(Bits, RNG.next())` by hand, which asserts on any
+/// width below 64 in a build with assertions enabled. Draw through this and
+/// forgetting the mask stops being possible.
+uint64_t randomForWidth(PRNG &RNG, unsigned Bits);
 
 // ---- IR helpers ----
 
@@ -269,6 +302,6 @@ llvm::GlobalVariable *createPrivateByteGlobal(llvm::Module &M,
                                               bool IsConstant = true);
 
 /// Fill a buffer with random bytes from the module PRNG.
-void fillRandomBytes(uint8_t *Out, size_t Len);
+void fillRandomBytes(PRNG &RNG, uint8_t *Out, size_t Len);
 
 } // namespace kagura

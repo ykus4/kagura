@@ -33,10 +33,16 @@
 
 /* Walk the executable path up to the ".app" bundle root. */
 static int bundle_path(char *out, size_t outsz) {
-    uint32_t sz = (uint32_t)outsz;
     char exe[1024];
+    /* sz describes `exe`, the buffer _NSGetExecutablePath actually writes to.
+     * It used to be seeded from outsz - the size of the *destination* buffer -
+     * which only happened to be safe because the single caller passes 1024 for
+     * both.  Any caller with a larger `out` would have handed dyld a size
+     * larger than `exe`. */
+    uint32_t sz = (uint32_t)sizeof(exe);
     if (_NSGetExecutablePath(exe, &sz) != 0)
         return 0;
+    exe[sizeof(exe) - 1] = '\0';
     /* exe is typically .app/AppName or .app/Frameworks/… */
     char *p = exe + strlen(exe);
     while (p > exe) {

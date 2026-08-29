@@ -1,12 +1,12 @@
 # プラットフォーム固有パス
 
-ソース: `lib/Transforms/Platform/`
+| フラグ | パス | ターゲット | ソース |
+|:-------|:-----|:-----------|:-------|
+| `-kagura-objc` | ObjCObfuscation | iOS — ObjC のセレクタ / クラス名を IR メタデータ内で難読化 | `lib/Transforms/Platform/` |
+| `-kagura-jni`  | JNIObfuscation  | Android — 静的 `Java_*` を動的 `RegisterNatives` に変換 | `lib/Transforms/Platform/` |
+| `-kagura-vm`   | VMObfuscation   | 関数本体をカスタムスタックベース VM バイトコードに仮想化 | `lib/Transforms/VM/` |
 
-| フラグ | パス | ターゲット |
-|:-------|:-----|:-----------|
-| `-kagura-objc` | ObjCObfuscation | iOS — ObjC のセレクタ / クラス名を IR メタデータ内で難読化 |
-| `-kagura-jni`  | JNIObfuscation  | Android — 静的 `Java_*` を動的 `RegisterNatives` に変換 |
-| `-kagura-vm`   | VMObfuscation   | 関数本体をカスタムスタックベース VM バイトコードに仮想化 |
+`kagura-vm` は便宜上このページに載せていますが、プラットフォーム固有ではなく `Platform/` にもありません。全ターゲットで動作し、独立したサブシステムを持ちます。
 
 ## `kagura-vm`
 

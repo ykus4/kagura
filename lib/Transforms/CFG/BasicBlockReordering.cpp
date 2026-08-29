@@ -38,7 +38,7 @@ PreservedAnalyses BasicBlockReorderingPass::run(Function &F,
   if (F.isDeclaration() || F.size() < 3)
     return PreservedAnalyses::all();
 
-  PRNG &RNG = getModulePRNG();
+  PRNG &RNG = getModulePRNG(*F.getParent());
 
   // Collect non-entry, non-EH blocks.
   // EH landing-pad blocks must stay adjacent to their invoke predecessors;

@@ -19,18 +19,18 @@ GameGuardian / Cheat Engine and rooted-device farms running Frida.
 {
   "profile": "BALANCED",
   "passes": {
-    "str":     true,
-    "wstr":    true,
-    "mvo":     true,
-    "pe":      true,
-    "fla":     true,
-    "bcf":     true,
-    "sub":     true,
-    "anti-debug": true,
-    "tamper":  true,
-    "bbcheck": false,
-    "honey":   true,
-    "telemetry": true
+    "str":        true,
+    "wstr":       true,
+    "mvo":        true,
+    "pe":         true,
+    "fla":        true,
+    "bcf":        true,
+    "sub":        true,
+    "anti_debug": true,
+    "tamper":     true,
+    "bbcheck":    false,
+    "honey":      true,
+    "telemetry":  true
   },
   "tuning": {
     "bcf_prob": 40,
@@ -44,16 +44,19 @@ Why these choices:
 - **BALANCED-equivalent** — games are FPS-sensitive. STRONG profile costs
   too much frame budget; reserve `kagura_vm` for non-hot functions like the
   daily-reward signer
-- **`bbcheck: false`** — per-BB checksums add 2–5% to **every** function;
-  not worth it for a 60fps render loop
+- **`bbcheck: false`** — the checksum call sites cost 2–5% on **every**
+  function, which a 60fps render loop cannot spare; and they buy nothing until
+  you write your own `kagura_bb_check`, because the shipped one always passes
 - **`telemetry`** — emit detection events to your server so a population of
   cheaters becomes visible even if a single client crashes / responds
-  softly
+  softly. The pass calls `kagura_telemetry_event(event_id)`, a weak no-op you
+  override with your own reporting
 
 ## Source-side: `Protected<T>` for game state
 
 ```cpp
 #include "kagura/game_protect.h"
+#include "kagura/runtime.h"
 
 class Player {
     kagura::Protected<int>   hp_      {100};
@@ -74,12 +77,21 @@ void initAntiCheat() {
     kagura::Protected<int>::setTamperCallback([] {
         // Soft response: don't crash — report to server, then desync the
         // player's session so future actions are rejected anyway.
-        kagura_telemetry_report("tamper_detected", 1);
+        //
+        // kagura_telemetry_event takes a uint32 id, not a string: the pass
+        // emits the FNV-1a-32 hash of the function name, and shipping the
+        // name itself would undo the string encryption. Hash your own labels
+        // the same way so both kinds of event land in one namespace.
+        kagura_telemetry_event(kagura_fnv1a32_str("tamper_detected"));
         // Optionally roll dice on a delayed crash to avoid giving an
         // attacker a clean detection point.
     });
 }
 ```
+
+`kagura_telemetry_event` is a weak no-op in the shipped runtime. Define your
+own to actually send anything; map ids back to names with the
+`-kagura-symmap` output.
 
 Why `Protected<T>` over raw `kagura-mvo`:
 
@@ -111,19 +123,25 @@ cheat trainer built for v1.0.4 doesn't work on v1.0.5.
 In your title-screen / first-frame code:
 
 ```cpp
+#include "kagura/runtime.h"
+
 void onFirstFrame() {
     // Probe for hook frameworks (Frida gadget, Substrate, fishhook, etc.)
-    if (kagura_check_loaded_libraries() != 0) {
+    if (kagura_suspicious_lib_loaded()) {
         // Don't kick the player — just disable competitive features
         disableLeaderboards();
-        kagura_telemetry_report("hooked_libs", 1);
+        kagura_telemetry_event(kagura_fnv1a32_str("hooked_libs"));
     }
 
-    // Probe for debugger attach
-    if (kagura_check_breakpoints() != 0 || kagura_check_emulator() != 0) {
+    // Probe for debugger attach. Use the int-returning predicates: the
+    // similarly named kagura_check_breakpoints() returns void and fires the
+    // tamper hook itself, which would kick the player we just decided not to
+    // kick.
+    if (kagura_check_sw_breakpoints() || kagura_check_hw_breakpoints() ||
+        kagura_check_emulator()) {
         // Same: feature-gate, don't crash
         disableLeaderboards();
-        kagura_telemetry_report("debugger_or_emu", 1);
+        kagura_telemetry_event(kagura_fnv1a32_str("debugger_or_emu"));
     }
 }
 ```

@@ -29,6 +29,9 @@
  *   - Nonces are stored in a fixed-size ring buffer (NONCE_HISTORY = 32).
  *   - kagura_nonce_is_fresh() returns 0 if the nonce was seen before.
  *   - Nonces older than NONCE_TTL_SECS (300s) are evicted automatically.
+ *   - A nonce longer than NONCE_MAX_LEN (64) is rejected by both halves of the
+ *     API rather than truncated, so the stored form always compares equal to
+ *     the value it was recorded from.
  *
  * HMAC-SHA256 note:
  *   We use a simple HMAC construction over the kagura AES infrastructure.
@@ -78,6 +81,14 @@ static int           g_nonce_head = 0;
  */
 int kagura_nonce_is_fresh(const char *nonce, size_t len) {
     if (!nonce || len == 0) return 0;
+    /* An over-long nonce is rejected, not truncated.  kagura_nonce_consume()
+     * stores at most NONCE_MAX_LEN characters, while the comparison below is
+     * `elen == len && memcmp(...)`, so a nonce of 65 characters or more could
+     * never equal its own truncated stored form: it looked fresh on every
+     * single presentation and replay protection did not exist for it.  Making
+     * both ends refuse the same inputs is what keeps store and compare in
+     * agreement; a caller that presents one gets "not fresh", the safe answer. */
+    if (len > NONCE_MAX_LEN) return 0;
     time_t now = time(NULL);
     for (int i = 0; i < NONCE_HISTORY; ++i) {
         nonce_entry_t *e = &g_nonce_ring[i];
@@ -100,7 +111,9 @@ int kagura_nonce_is_fresh(const char *nonce, size_t len) {
  */
 void kagura_nonce_consume(const char *nonce, size_t len) {
     if (!nonce || len == 0) return;
-    if (len > NONCE_MAX_LEN) len = NONCE_MAX_LEN;
+    /* Same bound as kagura_nonce_is_fresh(): storing a truncated prefix would
+     * record a value that can never match the nonce it came from. */
+    if (len > NONCE_MAX_LEN) return;
     nonce_entry_t *slot = &g_nonce_ring[g_nonce_head % NONCE_HISTORY];
     memcpy(slot->value, nonce, len);
     slot->value[len] = '\0';

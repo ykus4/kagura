@@ -59,12 +59,22 @@ static Function *buildAntiDebugConstructor(Module &M, bool AntiFramework,
   auto *AbortFTy = FunctionType::get(VoidTy, false);
   auto *AbortFn  = getOrDeclare(M, "abort", AbortFTy);
 
-  // kagura_on_tamper_detected() — weak user hook
-  auto *HookFn = Function::Create(FTy, Function::WeakAnyLinkage,
-                                   "kagura_on_tamper_detected", M);
+  // kagura_on_tamper_detected() — weak user hook.
+  //
+  // Looked up rather than created outright. Function::Create with a name the
+  // module already has does not fail, it *renames*: with -kagura-bbcheck also
+  // enabled — which the STRONG profile does — BasicBlockChecksum declares this
+  // symbol first, and the definition below landed as
+  // @kagura_on_tamper_detected.1. That left the real name an undefined
+  // declaration and the default implementation a dead copy nobody calls, so
+  // the pass silently stopped providing the abort() default it advertises.
+  auto *HookFn = getOrDeclare(M, "kagura_on_tamper_detected", FTy);
   HookFn->addFnAttr(Attribute::NoUnwind);
-  // Default implementation: just call abort
-  {
+  // Default implementation: just call abort. Only when nothing has defined it
+  // yet — a body already present belongs to another kagura pass or to the
+  // user, and either outranks this default.
+  if (HookFn->isDeclaration()) {
+    HookFn->setLinkage(Function::WeakAnyLinkage);
     auto *HookEntry = BasicBlock::Create(Ctx, "entry", HookFn);
     IRBuilder<> HB(HookEntry);
     HB.CreateCall(AbortFn);

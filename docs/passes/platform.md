@@ -1,12 +1,14 @@
 # Platform-Specific Passes
 
-Source: `lib/Transforms/Platform/`
+| Flag | Pass | Target | Source |
+|:-----|:-----|:-------|:-------|
+| `-kagura-objc` | ObjCObfuscation | iOS — obfuscates ObjC selector and class names in IR metadata | `lib/Transforms/Platform/` |
+| `-kagura-jni`  | JNIObfuscation  | Android — converts static `Java_*` to dynamic `RegisterNatives` | `lib/Transforms/Platform/` |
+| `-kagura-vm`   | VMObfuscation   | Virtualizes function bodies into a custom stack-based VM bytecode | `lib/Transforms/VM/` |
 
-| Flag | Pass | Target |
-|:-----|:-----|:-------|
-| `-kagura-objc` | ObjCObfuscation | iOS — obfuscates ObjC selector and class names in IR metadata |
-| `-kagura-jni`  | JNIObfuscation  | Android — converts static `Java_*` to dynamic `RegisterNatives` |
-| `-kagura-vm`   | VMObfuscation   | Virtualizes function bodies into a custom stack-based VM bytecode |
+`kagura-vm` is documented here for convenience, but it is not
+platform-specific and does not live in `Platform/` — it works on every target
+and has its own subsystem.
 
 ## `kagura-vm`
 

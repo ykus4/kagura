@@ -83,7 +83,7 @@ PreservedAnalyses MemoryValueObfuscationPass::run(Function &F,
   // The allocaEscapes() check already rejects any alloca whose address is
   // passed to an invoke or otherwise escapes.
 
-  PRNG &RNG    = getModulePRNG();
+  PRNG &RNG    = getModulePRNG(*F.getParent());
   bool Changed = false;
 
   // Collect eligible allocas upfront (avoid iterator invalidation).
@@ -93,7 +93,7 @@ PreservedAnalyses MemoryValueObfuscationPass::run(Function &F,
       if (auto *AI = dyn_cast<AllocaInst>(&I)) {
         // Skip kagura's own injected allocas (e.g. FLA's dispatch variable).
         // After optimization the name is stripped, so detect structurally.
-        if (AI->getName().starts_with("kagura."))
+        if (isGenerated(*AI) || AI->getName().starts_with("kagura."))
           continue;
         if (isFLADispatchAlloca(AI))
           continue;

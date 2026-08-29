@@ -30,6 +30,19 @@ set(KAGURA_RUNTIME_SOURCES
   core/telemetry.c
   core/random.c
 
+  # Same story as blob_integrity.c, one pass over.
+  # lib/Transforms/AntiAnalysis/AntiTamper.cpp emits kagura_self_check into
+  # main() and kagura_runtime_hash_check per instrumented function on every
+  # target except Wasm - its only guard is isWasmTarget - but both were defined
+  # in ios/jailbreak_detection.c, which is compiled only under `if(APPLE)`
+  # below.  -kagura-anti-tamper therefore could not link on Linux, Android or
+  # Windows.  Unlike the Windows anti-debug gap noted further down, this one
+  # needed no new platform detectors: neither function is OS-specific (the hash
+  # check branches on ARCHITECTURE and on dladdr availability), so they moved
+  # to core/self_check.c and the aggregate they call dispatches to whichever
+  # per-platform detectors the target actually has.
+  core/self_check.c
+
   # Response policy: one owner for both exported names, all platforms.
   core/tamper_response.c
   core/soft_response.c
@@ -92,6 +105,15 @@ endif()
 # to stubs on desktop Linux; that is intentional, they still compile there.
 if(ANDROID OR (UNIX AND NOT APPLE))
   target_sources(kagura_runtime PRIVATE
+    # The four basic root probes here used to live in ios/jailbreak_detection.c
+    # behind `#if defined(__ANDROID__)` - an Android-only block inside a file
+    # only ever fed to an Apple compiler, so no configuration had ever compiled
+    # them.  That is the same hiding place that let a call to the non-existent
+    # `kaguramaps_contain` survive in android_root_advanced.c, which is why
+    # root_paths.c carries no internal __ANDROID__ guard: it compiles on the
+    # desktop Linux that CI builds, and only there does anything type-check it.
+    android/root_paths.c
+
     android/android_root_advanced.c
     android/jni_hook_detection.c
     android/play_integrity.c
@@ -132,7 +154,7 @@ if(WIN32)
 endif()
 
 target_include_directories(kagura_runtime PUBLIC
-  ${CMAKE_SOURCE_DIR}/include
+  ${PROJECT_SOURCE_DIR}/include
 )
 
 set_target_properties(kagura_runtime PROPERTIES

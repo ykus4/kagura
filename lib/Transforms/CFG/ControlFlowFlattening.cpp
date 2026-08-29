@@ -8,6 +8,7 @@
 #include "kagura/Passes/CFG.h"
 #include "kagura/Utils.h"
 
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -30,6 +31,19 @@ static bool flattenFunction(Function &F, PRNG &RNG) {
         isa<InvokeInst>(BB.getTerminator()))
       return false;
 
+  // The entry block's terminator is rebuilt below as "store the initial state,
+  // branch to the dispatcher", and only the BranchInst shapes are translated:
+  // an unconditional branch keeps its successor's case value, a conditional
+  // one selects between two. Any other terminator falls through to an initial
+  // state of 0, which is the dispatcher's default case — `unreachable`. A
+  // `switch` in the entry block is common at -O2, and this pass erased it
+  // along with every edge it carried, silently. Decline instead.
+  //
+  // Checked before demotePhis() so that declining leaves the function
+  // untouched; demotion does not change a terminator's kind.
+  if (!isa<BranchInst>(F.getEntryBlock().getTerminator()))
+    return false;
+
   LLVMContext &Ctx = F.getContext();
   auto *Int32Ty    = Type::getInt32Ty(Ctx);
 
@@ -47,11 +61,20 @@ static bool flattenFunction(Function &F, PRNG &RNG) {
   if (WorkBlocks.empty())
     return false;
 
-  // Step 3: Assign case values
+  // Step 3: Assign case values.
+  //
+  // Distinct, and never 0 — 0 is the "no case value" sentinel used below and
+  // lands on the dispatcher's unreachable default. Duplicates were previously
+  // possible: two blocks drawing the same 32-bit value produced two
+  // addCase() calls with the same constant, which is a verifier error, and
+  // when it slipped past, one of the two blocks became permanently dead.
+  // At ~1e-5 collision probability for a 100-block function it is rare enough
+  // to never show up in testing and certain enough to show up in the field.
   std::map<BasicBlock *, uint32_t> CaseMap;
+  SmallSet<uint32_t, 32> Used;
   for (auto *BB : WorkBlocks) {
     uint32_t Val;
-    do { Val = RNG.next32(); } while (Val == 0);
+    do { Val = RNG.next32(); } while (Val == 0 || !Used.insert(Val).second);
     CaseMap[BB] = Val;
   }
 
@@ -119,6 +142,16 @@ static bool flattenFunction(Function &F, PRNG &RNG) {
   // LoopEnd -> LoopHeader
   IRBuilder<>(LoopEnd).CreateBr(LoopHeader);
 
+  // Mark the dispatcher so the passes that run after this one can recognise
+  // it. They all used to test for the "kagura." name prefix, which is an
+  // empty string under -fdiscard-value-names — i.e. in every shipping
+  // toolchain. The alloca is marked too: MemoryValueObfuscation keys off it.
+  markGenerated(*PreLoop);
+  markGenerated(*LoopHeader);
+  markGenerated(*LoopEnd);
+  markGenerated(*DefaultBB);
+  markGenerated(*SwitchVar);
+
   // Step 7: Wire each work block into the switch
   for (auto *BB : WorkBlocks) {
     Switch->addCase(ConstantInt::get(Int32Ty, CaseMap[BB]), BB);
@@ -170,7 +203,7 @@ ControlFlowFlatteningPass::run(Function &F, FunctionAnalysisManager &) {
 
   if (!shouldObfuscate(F, "fla"))
     return PreservedAnalyses::all();
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(*F.getParent());
   bool Changed = flattenFunction(F, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

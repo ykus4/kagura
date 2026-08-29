@@ -131,6 +131,14 @@ jobs:
             || { echo "::error::plugin missing from install tree"; exit 1; }
           test -f "${BUNDLE}/lib/libkagura_runtime.a" \
             || { echo "::error::runtime missing from install tree"; exit 1; }
+          # The install(TARGETS ... EXPORT KaguraTargets) calls existed for a
+          # long time with no install(EXPORT) to match, and CMake accepts an
+          # unused export set without a word — so every tarball shipped without
+          # a CMake package and find_package(Kagura) could not work.
+          for f in KaguraConfig.cmake KaguraConfigVersion.cmake KaguraTargets.cmake; do
+            test -f "${BUNDLE}/lib/cmake/Kagura/$f" \
+              || { echo "::error::$f missing — find_package(Kagura) will not work"; exit 1; }
+          done
 
           tar -czf "${BUNDLE}.tar.gz" "${BUNDLE}"
           echo "bundle=${BUNDLE}.tar.gz" >> $GITHUB_OUTPUT

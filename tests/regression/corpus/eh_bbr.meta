@@ -1,2 +1,6 @@
 PASS=function(kagura-bbr)
 DESCRIPTION=BBR on EH function: landing-pad blocks must be skipped, non-EH blocks reordered safely
+# No EXPECT: BasicBlockReordering only changes block layout, and this
+# entry is about landing-pad blocks being left alone, so there is no name in
+# the output IR that only a working pass produces. The verifier and the
+# "does not crash" assertion are the checks here.

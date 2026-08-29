@@ -98,7 +98,7 @@ PreservedAnalyses ObjCObfuscationPass::run(Module &M,
     return PreservedAnalyses::all();
 
   LLVMContext &Ctx = M.getContext();
-  auto &RNG        = getModulePRNG();
+  auto &RNG        = getModulePRNG(M);
 
   // name mapping: original -> obfuscated
   std::map<std::string, std::string> NameMap;

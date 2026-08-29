@@ -204,7 +204,7 @@ static bool obfuscateFunction(Function &F, PRNG &RNG) {
   bool Changed = false;
 
   for (auto &BB : F) {
-    if (BB.getName().starts_with("kagura."))
+    if (isGenerated(BB) || BB.getName().starts_with("kagura."))
       continue;
     for (auto &I : BB) {
       for (unsigned OpIdx = 0; OpIdx < I.getNumOperands(); ++OpIdx) {
@@ -231,7 +231,7 @@ PreservedAnalyses ConstantObfuscationPass::run(Function &F,
                                                 FunctionAnalysisManager &) {
   if (!shouldObfuscate(F, "co"))
     return PreservedAnalyses::all();
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(*F.getParent());
   bool Changed = obfuscateFunction(F, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

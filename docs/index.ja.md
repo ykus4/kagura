@@ -5,6 +5,7 @@
 > `-kagura-*` フラグが *"Unknown command line argument"* で拒否されます。同梱の
 > `kagura-opt`、または `opt --load-pass-plugin=<plugin> -kagura-… -passes=…`
 > を使ってください（どちらも全対応バージョンで動作します）。
+> [既知の問題](https://github.com/ykus4/kagura/blob/main/CHANGELOG.md#known-issues)。
 
 
 > **モバイル・デスクトップ・WebAssembly 向けの LLVM ベース難読化・耐タンパーツールキット。**
@@ -44,7 +45,7 @@ Kagura はこれを LLVM IR レベル — コンパイラが IR をマシンコ�
 | デコンパイラで読める制御フロー | `kagura-fla` + `kagura-bcf` — CFG が switch ディスパッチの状態機械になり、不透明な死分岐を持つ |
 | メモリエディタ / GameGuardian の値フリーズ | `kagura-mvo` / `kagura-pe` / `Protected<T>` — alloca のたびに XOR 暗号化された値で格納 |
 | Frida / Substrate の動的計装 | `kagura-anti-debug` + ロード済みライブラリスキャン — フッキングフレームワークを実行時に検出・応答 |
-| バイナリパッチ (整合性チェックを NOP化) | `kagura-bbcheck` — BB ごとのオペコードチェックサムでバイナリ変更時に abort |
+| バイナリパッチ (整合性チェックを NOP化) | `kagura-tamper` — 起動時に関数チェックサムを検証、応答はオーバーライド可能なフック経由 |
 | インポートテーブル分析 (IDA の external calls) | `kagura-ci` — 外部呼び出しを実行時解決のサンクテーブルにルーティング |
 | Jailbreak / root 検出のバイパス | ランタイムモジュール: Mach-O 整合性、ELF 改ざん、Magisk/Zygisk/LSPosed 検出 |
 
@@ -65,6 +66,14 @@ Kagura はこれを LLVM IR レベル — コンパイラが IR をマシンコ�
 - :material-toolbox: **[統合](integration/index.md)**
 
     Xcode、Gradle/NDK、Unity、Unreal、CMake、Bazel、CocoaPods、SPM。
+
+- :material-book-open-variant: **[クックブック](cookbook/index.md)**
+
+    銀行、モバイルゲーム、SDK ベンダ、DRM — ポリシーと検証手順つきのレシピ形式ガイド。
+
+- :material-shield-search: **[セキュリティモデル](security-model.md)**
+
+    Kagura が守るもの、守らないもの、そして破ってはならない前提。
 
 - :material-cog: **[設定](configuration.md)**
 

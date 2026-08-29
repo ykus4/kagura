@@ -19,9 +19,9 @@
 // 3. Self-check at main()
 //    If the module contains a function named "main" we insert a call to
 //      kagura_self_check()
-//    at its very beginning.  The runtime implementation (jailbreak_detection.c)
-//    performs platform-specific jailbreak / root detection in addition to
-//    library-level integrity verification.
+//    at its very beginning.  The runtime implementation (core/self_check.c)
+//    dispatches to whatever jailbreak / root detection the target has, in
+//    addition to library-level integrity verification.
 //
 // Eligibility
 // -----------
@@ -77,7 +77,7 @@ namespace kagura {
 /// hashes the actual machine-code bytes, which is intentional: a compile-time
 /// opcode hash is embedded as a constant while the runtime re-hashes the
 /// loaded bytes.  Matching is therefore a structural consistency check rather
-/// than a byte-exact comparison; see jailbreak_detection.c for the approach.
+/// than a byte-exact comparison; see core/self_check.c for the approach.
 static uint32_t computeOpcodeHash(const Function &F) {
   uint32_t H = fnv1a32Init();
   for (const BasicBlock &BB : F) {

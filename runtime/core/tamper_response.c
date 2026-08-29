@@ -47,7 +47,7 @@
 
 /* ---- Overridable policy hook -------------------------------------------- */
 
-__attribute__((weak))
+KAGURA_WEAK
 void kagura_on_tamper_detected(void) {
 #if defined(_WIN32)
     /* ExitProcess rather than abort(): abort() raises a Windows Error

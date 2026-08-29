@@ -42,11 +42,38 @@ extern "C" {
 
 /* ---- Attribute shims ----------------------------------------------------- */
 
-#if defined(__GNUC__) || defined(__clang__)
+/* KAGURA_WEAK marks a default implementation the application may replace.
+ *
+ * It expands to nothing on Windows, on purpose. A weak *definition* on COFF
+ * becomes a weak external whose fallback is an absolute symbol, and a weak
+ * external does not pull its archive member in. So when the only definition
+ * lives in libkagura_runtime.a and the call site is elsewhere, the linker
+ * resolves the call against the absolute fallback and rejects it:
+ *
+ *   error LNK2016: absolute symbol 'kagura_on_tamper_detected' used as
+ *   target of REL32 relocation
+ *
+ * That is a link failure for any binary built with -kagura-bbcheck, and it
+ * stayed hidden because the Windows job registered four tests until the test
+ * registration was fixed.
+ *
+ * A plain definition is the right idiom here anyway: MSVC resolves a symbol
+ * from an object file in preference to one from a library and simply does not
+ * pull the library member in, so an application still overrides the default by
+ * defining its own — the same thing weak buys on ELF and Mach-O, without the
+ * absolute-symbol fallback.
+ */
+#if defined(_WIN32)
+#  define KAGURA_WEAK
+#elif defined(__GNUC__) || defined(__clang__)
 #  define KAGURA_WEAK     __attribute__((weak))
-#  define KAGURA_NORETURN __attribute__((noreturn))
 #else
 #  define KAGURA_WEAK
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#  define KAGURA_NORETURN __attribute__((noreturn))
+#else
 #  define KAGURA_NORETURN
 #endif
 
@@ -165,6 +192,22 @@ void kagura_telemetry_event(uint32_t event_id);
 int  kagura_device_key(uint8_t out[16]);
 void kagura_device_mix_key(uint8_t key[16]);
 
+/* core/self_check.c — the aggregate anti-tamper entry points.
+ *
+ * AntiTamper.cpp emits kagura_self_check into main() and
+ * kagura_runtime_hash_check at the entry of each instrumented function on
+ * every target except Wasm, so all three have a definition everywhere.  They
+ * used to be defined in ios/jailbreak_detection.c, which is compiled only
+ * under if(APPLE); -kagura-anti-tamper could not link off Apple as a result.
+ *
+ * kagura_jailbreak_detected dispatches to whatever detectors the target has
+ * (ios/jailbreak_detection.c on Apple, android/root_paths.c on Android).  On
+ * Windows and desktop Linux it has none and returns 0, meaning "not detected"
+ * rather than "known clean" — see the comment on the definition. */
+int  kagura_jailbreak_detected(void);
+void kagura_self_check(void);
+void kagura_runtime_hash_check(void *fn, uint32_t expected_hash);
+
 /* core/crash_symbolication.c */
 void kagura_sym_init(void);
 const char *kagura_symbolicate(uintptr_t pc);
@@ -210,8 +253,12 @@ void kagura_library_scan_check(void);
 int  kagura_symbol_interposed(void);
 void kagura_interposition_check(void);
 
-/* anti_dump.c */
-void kagura_poison_region(void *p, size_t n);
+/* anti_dump.c
+ * kagura_poison_region returns 1 only if the region was both zeroed AND made
+ * unreadable; 0 means the mprotect(PROT_NONE) failed and the (now zeroed)
+ * bytes are still mapped readable.  It used to return void, so a caller had no
+ * way to learn that the revocation half had not happened. */
+int  kagura_poison_region(void *p, size_t n);
 int  kagura_rwx_pages_present(void);
 int  kagura_anti_dump_check(void);
 void kagura_anti_dump_init(void);
@@ -220,19 +267,12 @@ void kagura_anti_dump_init(void);
  * Apple / iOS  (runtime/ios/)
  * =========================================================================== */
 
-/* jailbreak_detection.c */
+/* jailbreak_detection.c — Apple-only definitions. */
 int  kagura_check_cydia_path(void);
 int  kagura_check_substrate_dylib(void);
 int  kagura_check_sandbox_escape(void);
 int  kagura_check_fork(void);
 int  kagura_check_dyld_env(void);
-int  kagura_check_su_binary(void);
-int  kagura_check_root_packages(void);
-int  kagura_check_test_keys(void);
-int  kagura_check_rw_system(void);
-int  kagura_jailbreak_detected(void);
-void kagura_self_check(void);
-void kagura_runtime_hash_check(void *fn, uint32_t expected_hash);
 
 /* ios_integrity.c */
 int  kagura_codesign_valid(void);
@@ -297,6 +337,16 @@ int  kagura_appattest_local_check(void);
 /* ===========================================================================
  * Android / Linux  (runtime/android/)
  * =========================================================================== */
+
+/* root_paths.c — basic root probes.  These were declared in the Apple section
+ * and defined in ios/jailbreak_detection.c behind `#if defined(__ANDROID__)`,
+ * i.e. in a file no Android build ever compiles, so they had never been built
+ * by any configuration.  They are unguarded in root_paths.c so that the
+ * desktop-Linux CI build type-checks them. */
+int  kagura_check_su_binary(void);
+int  kagura_check_root_packages(void);
+int  kagura_check_test_keys(void);
+int  kagura_check_rw_system(void);
 
 /* android_root_advanced.c */
 int  kagura_magisk_present(void);

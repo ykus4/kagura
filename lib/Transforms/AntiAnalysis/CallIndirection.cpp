@@ -268,10 +268,10 @@ static unsigned rewriteCallSites(Function &Callee, unsigned SlotIdx,
 
 PreservedAnalyses CallIndirectionPass::run(Module &M,
                                             ModuleAnalysisManager &) {
-  // Check if any function in the module enables this pass.
-  // For module passes the flag governs the whole module.
-  if (!kagura::opt::CI)
-    return PreservedAnalyses::all();
+  // No `if (!opt::CI) return` here: whether this pass runs is decided when the
+  // pipeline is built (Plugin.cpp), and `opt -passes=kagura-ci` never sets the
+  // flag — so re-checking it made that entry point a silent no-op. See the
+  // note on shouldObfuscate() in Utils.h.
 
   // 1. Collect unique external callees across the module.
   std::vector<Function *> Callees = collectExternalCallees(M);

@@ -122,7 +122,9 @@ static Value *xorSub1(BinaryOperator *I, IRBuilder<> &B, PRNG &) {
 static Value *mulSub0(BinaryOperator *I, IRBuilder<> &B, PRNG &RNG) {
   // a * b  =>  a * (b ^ r ^ r)  = no-op but confuses solvers
   auto *T = I->getType();
-  auto *R  = ConstantInt::get(T, RNG.next());
+  // Narrowed to T's width rather than relying on ConstantInt::get's implicit
+  // truncation, which upstream carries a TODO to turn off.
+  auto *R  = ConstantInt::get(T, randomForWidth(RNG, T->getIntegerBitWidth()));
   auto *XR = B.CreateXor(I->getOperand(1), R);
   auto *XR2 = B.CreateXor(XR, R);
   return B.CreateMul(I->getOperand(0), XR2, "sub.mul0");
@@ -155,7 +157,7 @@ static bool substituteFunction(Function &F, uint32_t Iterations, PRNG &RNG) {
     SmallVector<BinaryOperator *, 16> Worklist;
     for (auto &BB : F) {
       // Skip kagura's own dispatcher blocks
-      if (BB.getName().starts_with("kagura."))
+      if (isGenerated(BB) || BB.getName().starts_with("kagura."))
         continue;
       for (auto &I : BB)
         if (auto *BO = dyn_cast<BinaryOperator>(&I))
@@ -182,7 +184,7 @@ PreservedAnalyses SubstitutionPass::run(Function &F,
                                         FunctionAnalysisManager &) {
   if (!shouldObfuscate(F, "sub"))
     return PreservedAnalyses::all();
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(*F.getParent());
   bool Changed = substituteFunction(F, Iterations, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
