@@ -42,11 +42,38 @@ extern "C" {
 
 /* ---- Attribute shims ----------------------------------------------------- */
 
-#if defined(__GNUC__) || defined(__clang__)
+/* KAGURA_WEAK marks a default implementation the application may replace.
+ *
+ * It expands to nothing on Windows, on purpose. A weak *definition* on COFF
+ * becomes a weak external whose fallback is an absolute symbol, and a weak
+ * external does not pull its archive member in. So when the only definition
+ * lives in libkagura_runtime.a and the call site is elsewhere, the linker
+ * resolves the call against the absolute fallback and rejects it:
+ *
+ *   error LNK2016: absolute symbol 'kagura_on_tamper_detected' used as
+ *   target of REL32 relocation
+ *
+ * That is a link failure for any binary built with -kagura-bbcheck, and it
+ * stayed hidden because the Windows job registered four tests until the test
+ * registration was fixed.
+ *
+ * A plain definition is the right idiom here anyway: MSVC resolves a symbol
+ * from an object file in preference to one from a library and simply does not
+ * pull the library member in, so an application still overrides the default by
+ * defining its own — the same thing weak buys on ELF and Mach-O, without the
+ * absolute-symbol fallback.
+ */
+#if defined(_WIN32)
+#  define KAGURA_WEAK
+#elif defined(__GNUC__) || defined(__clang__)
 #  define KAGURA_WEAK     __attribute__((weak))
-#  define KAGURA_NORETURN __attribute__((noreturn))
 #else
 #  define KAGURA_WEAK
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#  define KAGURA_NORETURN __attribute__((noreturn))
+#else
 #  define KAGURA_NORETURN
 #endif
 

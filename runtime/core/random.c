@@ -77,7 +77,7 @@ static uint64_t entropy_fallback(void) {
     return z ^ (z >> 31);
 }
 
-__attribute__((weak))
+KAGURA_WEAK
 uint64_t kagura_random_u64(void) {
     uint64_t v = 0;
 
