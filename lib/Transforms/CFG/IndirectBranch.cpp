@@ -92,14 +92,25 @@ static CallInst *indirectifyCall(CallInst &CI, Function &ParentFn, PRNG &RNG) {
     return nullptr;
   if (!isSameModuleDefinition(ParentFn, *Callee))
     return nullptr;
-  if (Callee->getName().starts_with("kagura_"))
+  if (isKaguraSymbol(Callee->getName()))
     return nullptr;
   if (hasUnsafeOperandBundles(CI))
+    return nullptr;
+  // musttail requires the call to be immediately followed by a ret of its
+  // result and the signatures to match exactly. Routing it through a loaded
+  // function pointer breaks that contract; FunctionSplit already declines
+  // these for the same reason.
+  if (CI.isMustTailCall())
     return nullptr;
 
   Module &M          = *ParentFn.getParent();
   LLVMContext &Ctx   = M.getContext();
-  FunctionType *FTy  = Callee->getFunctionType();
+  // The *call site's* type, not the callee's. They differ whenever a
+  // declaration in scope disagrees with the definition — pre-prototype C, a
+  // varargs/non-varargs mismatch, a bitcast call — and rebuilding the call
+  // with the callee's type then asserts on the argument count or types
+  // instead of declining.
+  FunctionType *FTy  = CI.getFunctionType();
 
   // --- Create the function-pointer global ---
   // Type: ptr (opaque pointer mode) or FTy* in typed-pointer builds.
@@ -125,32 +136,11 @@ static CallInst *indirectifyCall(CallInst &CI, Function &ParentFn, PRNG &RNG) {
   Value *LoadedFPtr = B.CreateAlignedLoad(FPtrTy, FPtrGV, Align(8),
                                           /*isVolatile=*/false, "ibr.fptr");
 
-  // Collect call arguments
-  SmallVector<Value *, 8> Args(CI.args());
-
-  // Collect operand bundles
-  SmallVector<OperandBundleDef, 2> Bundles;
-  for (unsigned i = 0, e = CI.getNumOperandBundles(); i != e; ++i)
-    Bundles.emplace_back(CI.getOperandBundleAt(i));
-
-  CallInst *NewCall = B.CreateCall(FTy, LoadedFPtr, Args, Bundles, "");
-
-  // Preserve important call-site properties
-  NewCall->setCallingConv(CI.getCallingConv());
-  NewCall->setAttributes(CI.getAttributes());
-  NewCall->setTailCallKind(CI.getTailCallKind());
-  NewCall->setDebugLoc(CI.getDebugLoc());
-
-  // Inherit fast-math flags for calls that return floating-point
-  if (CI.getType()->isFPOrFPVectorTy())
-    NewCall->copyFastMathFlags(&CI);
-
-  // Replace all uses and erase the original
-  if (!CI.getType()->isVoidTy())
-    CI.replaceAllUsesWith(NewCall);
-  CI.eraseFromParent();
-
-  return NewCall;
+  // Rebuild the call through the shared helper rather than by hand: the
+  // "copy cc, attributes, tail-call kind, debug location and fast-math
+  // flags" block was open-coded in four places, and one copy had already
+  // lost copyFastMathFlags. See replaceCalleeWith() in Utils.h.
+  return replaceCalleeWith(&CI, FTy, LoadedFPtr);
 }
 
 // ---- Main per-function worker ----
