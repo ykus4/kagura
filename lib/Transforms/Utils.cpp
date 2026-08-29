@@ -13,6 +13,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
@@ -62,9 +63,7 @@ bool hasAnnotation(Function &F, StringRef Attr) {
   return false;
 }
 
-// ---- Kagura-generated symbol recognition ----------------------------------
-
-// ---- Generated-IR marker ---------------------------------------------------
+// ---- Kagura-generated IR recognition ---------------------------------------
 
 static constexpr StringRef kGeneratedMD = "kagura.generated";
 
@@ -270,27 +269,68 @@ uint64_t PRNG::nextRange(uint64_t Lo, uint64_t Hi) {
   return Lo + (next() % (Hi - Lo));
 }
 
-static PRNG GlobalPRNG(0);
+/// The -kagura-seed / -kagura-build-id pair, folded into one value.
+static uint64_t baseSeed() {
+  uint64_t Seed = opt::Seed;
+  // 4.2.7: Mix BuildID into seed for per-build key rotation.
+  // Using FNV-1a over the BuildID string ensures unique keys even when
+  // the user specifies a fixed -kagura-seed for reproducible output.
+  if (!opt::BuildID.empty())
+    Seed ^= fnv1a64(opt::BuildID.getValue());
+  return Seed;
+}
 
-PRNG &getModulePRNG() {
-  static bool Seeded = false;
-  if (!Seeded) {
-    uint64_t BaseSeed = opt::Seed;
-    // 4.2.7: Mix BuildID into seed for per-build key rotation.
-    // Using FNV-1a over the BuildID string ensures unique keys even when
-    // the user specifies a fixed -kagura-seed for reproducible output.
-    if (!opt::BuildID.empty()) {
-      uint64_t Hash = 0xcbf29ce484222325ULL; // FNV offset basis
-      for (char C : opt::BuildID.getValue()) {
-        Hash ^= static_cast<uint8_t>(C);
-        Hash *= 0x100000001b3ULL; // FNV prime
-      }
-      BaseSeed ^= Hash;
-    }
-    GlobalPRNG = PRNG(BaseSeed);
-    Seeded = true;
+PRNG &getModulePRNG(const Module &M) {
+  // One PRNG per module, per thread.
+  //
+  // This used to be a single process-global instance behind a `static bool
+  // Seeded` guard: seeded once, then shared by every module and every pass for
+  // the life of the process, with each module continuing the draw sequence the
+  // previous one left off at.
+  //
+  // The ordinary `clang a.c b.c` case was never affected — the driver forks a
+  // cc1 per input, so each module got a fresh process and a fresh PRNG. What
+  // is affected is anything that runs more than one module through one
+  // process:
+  //
+  //   - ThinLTO runs the per-module backends in parallel *in the same
+  //     process*. State and Seeded were plain non-atomic statics, so that is a
+  //     data race, and the resulting keys depend on how the backends
+  //     interleave. Plugin.cpp only skips the LTO phases from LLVM 20 onward,
+  //     so 17-19 run there unguarded.
+  //
+  //   - Any embedder that drives the pipeline as a library over several
+  //     modules, which is the shape kagura-opt and the fuzz targets have.
+  //
+  // Re-seeding per module decouples them and makes each one independently
+  // reproducible; thread_local removes the race.
+  //
+  // The seed material is the module identifier's *basename*, not the whole
+  // thing. The identifier is a path — "/home/ci/work/build/foo.c" — so mixing
+  // it in whole would make the obfuscation keys depend on the build
+  // directory, and two checkouts of the same source at different paths would
+  // stop producing identical binaries. That is exactly the property
+  // scripts/ci/verify-reproducible.sh exists to protect. Taking the basename
+  // keeps distinct TUs distinct while staying independent of where the tree
+  // happens to live.
+  //
+  // Two files with the same basename in different directories share a stream.
+  // That is no worse than the single shared stream this replaces, and
+  // -kagura-build-id is the knob for anyone who wants keys to differ anyway.
+  struct Cache {
+    std::string Id;
+    PRNG        Gen{0};
+    bool        Valid = false;
+  };
+  static thread_local Cache C;
+
+  StringRef Id = sys::path::filename(M.getModuleIdentifier());
+  if (!C.Valid || C.Id != Id) {
+    C.Id    = Id.str();
+    C.Gen   = PRNG(baseSeed() ^ fnv1a64(Id));
+    C.Valid = true;
   }
-  return GlobalPRNG;
+  return C.Gen;
 }
 
 // ---- Exception-handling safety ----
@@ -568,8 +608,7 @@ GlobalVariable *createPrivateByteGlobal(Module &M, ArrayRef<uint8_t> Data,
                             GlobalValue::PrivateLinkage, Init, Name);
 }
 
-void fillRandomBytes(uint8_t *Out, size_t Len) {
-  PRNG &RNG = getModulePRNG();
+void fillRandomBytes(PRNG &RNG, uint8_t *Out, size_t Len) {
   for (size_t I = 0; I < Len; I += 8) {
     uint64_t V = RNG.next();
     size_t N = std::min(static_cast<size_t>(8), Len - I);

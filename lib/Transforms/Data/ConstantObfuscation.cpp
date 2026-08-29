@@ -231,7 +231,7 @@ PreservedAnalyses ConstantObfuscationPass::run(Function &F,
                                                 FunctionAnalysisManager &) {
   if (!shouldObfuscate(F, "co"))
     return PreservedAnalyses::all();
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(*F.getParent());
   bool Changed = obfuscateFunction(F, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

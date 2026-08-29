@@ -369,7 +369,7 @@ PreservedAnalyses WideStringEncryptionPass::run(Module &M,
   // sets the flag — so re-checking it made that entry point a silent no-op.
   // See the note on shouldObfuscate() in Utils.h.
 
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(M);
   bool Changed = false;
 
   // ---- Wide strings (i16 / i32 ConstantDataArray) -------------------------

@@ -196,7 +196,7 @@ PreservedAnalyses JNIObfuscationPass::run(Module &M,
   if (!IsAndroid && !TripleStr.empty())
     return PreservedAnalyses::all();
 
-  auto &RNG = getModulePRNG();
+  auto &RNG = getModulePRNG(M);
 
   SmallVector<Function *, 16> JNIFuncs;
   for (auto &F : M) {

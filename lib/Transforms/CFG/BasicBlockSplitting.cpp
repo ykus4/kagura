@@ -64,7 +64,7 @@ PreservedAnalyses BasicBlockSplittingPass::run(Function &F,
   if (hasExceptionHandling(F))
     return PreservedAnalyses::all();
 
-  PRNG &RNG = getModulePRNG();
+  PRNG &RNG = getModulePRNG(*F.getParent());
   uint32_t Min       = BBSMin   > 0 ? BBSMin   : 3u;
   uint32_t MaxSplits = BBSMaxSplits > 0 ? BBSMaxSplits : 2u;
 

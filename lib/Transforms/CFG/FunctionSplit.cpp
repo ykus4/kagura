@@ -386,7 +386,7 @@ static bool extractBlock(BasicBlock *BB, unsigned Index, PRNG &RNG) {
 PreservedAnalyses FunctionSplitPass::run(Module &M,
                                           ModuleAnalysisManager & /*MAM*/) {
   bool AnyChanged = false;
-  PRNG &RNG = getModulePRNG();
+  PRNG &RNG = getModulePRNG(M);
 
   // Collect functions to process up-front; extractBlock may add new Functions
   // to the module that we must not re-visit.

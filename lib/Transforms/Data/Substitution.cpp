@@ -184,7 +184,7 @@ PreservedAnalyses SubstitutionPass::run(Function &F,
                                         FunctionAnalysisManager &) {
   if (!shouldObfuscate(F, "sub"))
     return PreservedAnalyses::all();
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(*F.getParent());
   bool Changed = substituteFunction(F, Iterations, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

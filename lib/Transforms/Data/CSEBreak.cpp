@@ -206,7 +206,7 @@ PreservedAnalyses CSEBreakPass::run(Function &F, FunctionAnalysisManager &) {
     return PreservedAnalyses::all();
   if (F.isDeclaration())
     return PreservedAnalyses::all();
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(*F.getParent());
   bool Changed = breakCSEInFunction(F, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

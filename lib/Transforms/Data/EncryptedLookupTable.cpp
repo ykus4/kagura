@@ -106,7 +106,7 @@ PreservedAnalyses EncryptedLookupTablePass::run(Function &F,
 
   Module &M     = *F.getParent();
   LLVMContext &Ctx = M.getContext();
-  PRNG &RNG     = getModulePRNG();
+  PRNG &RNG     = getModulePRNG(*F.getParent());
   bool Changed  = false;
 
   SmallVector<SwitchInst *, 16> Switches;

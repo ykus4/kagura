@@ -83,7 +83,7 @@ PreservedAnalyses MemoryValueObfuscationPass::run(Function &F,
   // The allocaEscapes() check already rejects any alloca whose address is
   // passed to an invoke or otherwise escapes.
 
-  PRNG &RNG    = getModulePRNG();
+  PRNG &RNG    = getModulePRNG(*F.getParent());
   bool Changed = false;
 
   // Collect eligible allocas upfront (avoid iterator invalidation).

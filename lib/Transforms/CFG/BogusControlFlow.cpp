@@ -272,7 +272,7 @@ PreservedAnalyses BogusControlFlowPass::run(Function &F,
                                              FunctionAnalysisManager &) {
   if (!shouldObfuscate(F, "bcf"))
     return PreservedAnalyses::all();
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(*F.getParent());
   bool Changed = insertBogusFlow(F, Probability, Iterations, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

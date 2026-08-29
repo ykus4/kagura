@@ -144,7 +144,7 @@ PreservedAnalyses StringEncryptionAESPass::run(Module &M,
     return PreservedAnalyses::all();
 
   LLVMContext &Ctx = M.getContext();
-  auto &RNG        = getModulePRNG();
+  auto &RNG        = getModulePRNG(M);
   bool Changed     = false;
 
   FunctionCallee RuntimeDecrypt   = getOrDeclareRuntimeDecrypt(M);
@@ -163,8 +163,8 @@ PreservedAnalyses StringEncryptionAESPass::run(Module &M,
     // Generate random key (16 bytes) and nonce (8 bytes)
     uint8_t Key[16];
     uint8_t Nonce[8];
-    fillRandomBytes(Key, 16);
-    fillRandomBytes(Nonce, 8);
+    fillRandomBytes(RNG, Key, 16);
+    fillRandomBytes(RNG, Nonce, 8);
 
     // AES-128-CTR encrypt at compile time
     const auto *DataPtr = reinterpret_cast<const uint8_t *>(Raw.data());

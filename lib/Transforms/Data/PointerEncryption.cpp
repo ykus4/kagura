@@ -79,7 +79,7 @@ PreservedAnalyses PointerEncryptionPass::run(Function &F,
     return PreservedAnalyses::all();
   auto *IntPtrTy = Type::getIntNTy(Ctx, PtrBits);
 
-  PRNG &RNG    = getModulePRNG();
+  PRNG &RNG    = getModulePRNG(*F.getParent());
   bool Changed = false;
 
   // Collect eligible pointer allocas upfront (avoid invalidation).

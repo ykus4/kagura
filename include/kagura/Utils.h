@@ -145,8 +145,15 @@ private:
   uint64_t State;
 };
 
-/// Returns the module-level PRNG (seeded from -kagura-seed or system entropy).
-PRNG &getModulePRNG();
+/// Returns the PRNG for M, seeded from -kagura-seed / -kagura-build-id mixed
+/// with M's module identifier.
+///
+/// The module argument is not decoration. This used to be a process-global
+/// instance shared by every module that passed through the process, each one
+/// continuing the previous one's draw sequence. ThinLTO's parallel in-process
+/// backends raced on it, and any embedder driving several modules through one
+/// pipeline got keys that depended on compilation order.
+PRNG &getModulePRNG(const llvm::Module &M);
 
 /// A random N-bit value, already narrowed so it can be handed to APInt or
 /// ConstantInt without asserting.
@@ -295,6 +302,6 @@ llvm::GlobalVariable *createPrivateByteGlobal(llvm::Module &M,
                                               bool IsConstant = true);
 
 /// Fill a buffer with random bytes from the module PRNG.
-void fillRandomBytes(uint8_t *Out, size_t Len);
+void fillRandomBytes(PRNG &RNG, uint8_t *Out, size_t Len);
 
 } // namespace kagura

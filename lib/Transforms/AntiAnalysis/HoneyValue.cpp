@@ -192,7 +192,7 @@ PreservedAnalyses HoneyValuePass::run(Module &M, ModuleAnalysisManager &) {
   // sets the flag — so re-checking it made that entry point a silent no-op.
   // See the note on shouldObfuscate() in Utils.h.
 
-  PRNG &RNG = getModulePRNG();
+  PRNG &RNG = getModulePRNG(M);
 
   SmallVector<GlobalVariable *, 16> HoneyGVs;
   SmallVector<Function *, 8>        FakeFns;

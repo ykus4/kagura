@@ -8,7 +8,7 @@
 ;
 ; 3405691582 is 0xCAFEBABE in the decimal form the .ll printer uses.
 
-; RUN: %opt --load-pass-plugin=%kagura_plugin -kagura-seed=7 \
+; RUN: %opt --load-pass-plugin=%kagura_plugin -kagura-seed=7 -kagura-bcf-prob=100 \
 ; RUN:     -passes='function(kagura-bcf)',verify -S %s \
 ; RUN:   | %FileCheck %s --implicit-check-not=3405691582
 

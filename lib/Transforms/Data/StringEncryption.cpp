@@ -193,7 +193,7 @@ PreservedAnalyses StringEncryptionPass::run(Module &M,
     return PreservedAnalyses::all();
 
   LLVMContext &Ctx = M.getContext();
-  auto &RNG        = getModulePRNG();
+  auto &RNG        = getModulePRNG(M);
   bool Changed     = false;
 
   auto *Int8Ty = Type::getInt8Ty(Ctx);

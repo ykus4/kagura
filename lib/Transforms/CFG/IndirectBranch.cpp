@@ -190,7 +190,7 @@ PreservedAnalyses IndirectBranchPass::run(Function &F,
   if (!shouldObfuscate(F, "ibr"))
     return PreservedAnalyses::all();
 
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(*F.getParent());
   bool Changed = indirectifyCalls(F, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

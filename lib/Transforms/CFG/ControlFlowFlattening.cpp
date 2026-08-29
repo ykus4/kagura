@@ -203,7 +203,7 @@ ControlFlowFlatteningPass::run(Function &F, FunctionAnalysisManager &) {
 
   if (!shouldObfuscate(F, "fla"))
     return PreservedAnalyses::all();
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(*F.getParent());
   bool Changed = flattenFunction(F, RNG);
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

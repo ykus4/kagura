@@ -237,7 +237,7 @@ static bool processGlobal(Module &M, GlobalVariable *GV, PRNG &RNG,
 }
 
 PreservedAnalyses StringSplitPass::run(Module &M, ModuleAnalysisManager &) {
-  auto &RNG    = getModulePRNG();
+  auto &RNG    = getModulePRNG(M);
   bool Changed = false;
   uint32_t Idx = 0;
 
