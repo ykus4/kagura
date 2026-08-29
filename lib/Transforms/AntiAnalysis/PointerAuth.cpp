@@ -85,6 +85,33 @@ static bool isFunctionPointerConstant(const Constant *C) {
   return false;
 }
 
+/// Return true if every use of GV is one this pass knows how to rewrite:
+/// a load of the pointer, or a store *into* the slot.
+///
+/// This guard is load-bearing.  The software path replaces the `ptr` global
+/// with an `i64` one holding a tagged value, then RAUWs the old global.  Both
+/// are plain `ptr` values in opaque-pointer mode, so RAUW succeeds on any use
+/// — including ones that read or write the slot without going through the
+/// tag/untag sequence.  A `memcpy` from the global, or the address escaping to
+/// another TU, would then observe (or install) a value in the wrong domain:
+/// the reader untags something that was never tagged, and jumps to
+/// `real_pointer ^ key`.  Rejecting the global is the only safe answer, since
+/// the pass cannot see through those uses.
+static bool hasOnlyRewritableUses(const GlobalVariable &GV) {
+  for (const User *U : GV.users()) {
+    if (isa<LoadInst>(U))
+      continue;
+    if (const auto *SI = dyn_cast<StoreInst>(U)) {
+      // Storing *to* the slot is fine (we tag on the way in); storing the
+      // global's address *somewhere else* lets it escape untagged.
+      if (SI->getPointerOperand() == &GV)
+        continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 /// Return true if GV is a function-pointer global we should tag.
 static bool isTaggableGlobal(const GlobalVariable &GV) {
   if (GV.getName().starts_with("kagura_"))
@@ -100,6 +127,8 @@ static bool isTaggableGlobal(const GlobalVariable &GV) {
     return false;
   // Initializer must be a direct function reference or null pointer
   if (!isFunctionPointerConstant(GV.getInitializer()))
+    return false;
+  if (!hasOnlyRewritableUses(GV))
     return false;
   return true;
 }
@@ -123,16 +152,35 @@ static GlobalVariable *getOrCreatePacKey(Module &M) {
 
 // ---- Build key-init constructor ----
 
-/// Build `void kagura_init_pac_key(void)` that sets kagura_pac_key to a
-/// random 64-bit value obtained from kagura_random_u64() (runtime symbol).
-static Function *buildPacKeyConstructor(Module &M, GlobalVariable *PacKey) {
+/// Build `void kagura_init_pac_key(void)`: draw a random 64-bit key, XOR every
+/// tagged global with it, and publish the key.
+///
+/// The XOR loop is what closes the tag/untag contract.  A `.pac` global is
+/// emitted holding the *untagged* `ptrtoint(fn)`, because a ConstantExpr
+/// initializer cannot reference a value that does not exist until run time.
+/// Call sites, meanwhile, always compute `slot ^ kagura_pac_key`.  Those two
+/// halves agree only while the key is still zero: publishing a random key
+/// without re-tagging the slots leaves every rewritten call jumping to
+/// `real_pointer ^ key`, which faults on the first indirect call.  This is not
+/// hypothetical — it is what the pass shipped before this loop existed.
+///
+/// The pre-constructor state is self-consistent by the same argument
+/// (`slot ^ 0 == slot`), so a constructor that runs earlier and calls through
+/// one of these pointers still reaches the right function.  Between the two
+/// stores below there is a window in which the slots and the key disagree;
+/// that is unobservable in the single-threaded constructor phase this runs in,
+/// and closing it properly would need the whole sequence to be atomic.
+static Function *buildPacKeyConstructor(Module &M, GlobalVariable *PacKey,
+                                        ArrayRef<GlobalVariable *> Tagged) {
   LLVMContext &Ctx  = M.getContext();
   auto *Int64Ty     = Type::getInt64Ty(Ctx);
 
-  // Declare kagura_random_u64: i64 ()
+  // Declare kagura_random_u64: i64 ().  Held as a FunctionCallee rather than
+  // cast<Function>: if the module already declares the name with a different
+  // signature, getOrInsertFunction hands back a bitcast ConstantExpr and the
+  // cast would abort the compiler instead of the pass declining.
   auto *RngFTy = FunctionType::get(Int64Ty, false);
-  auto *RngFn  = cast<Function>(
-      M.getOrInsertFunction("kagura_random_u64", RngFTy).getCallee());
+  FunctionCallee Rng = M.getOrInsertFunction("kagura_random_u64", RngFTy);
 
   // void kagura_init_pac_key(void)
   auto *Ctor = createCtorFunction(M, "kagura_init_pac_key");
@@ -142,8 +190,18 @@ static Function *buildPacKeyConstructor(Module &M, GlobalVariable *PacKey) {
   auto *Entry = &Ctor->getEntryBlock();
   IRBuilder<> B(Entry);
 
-  // kagura_pac_key = kagura_random_u64()
-  Value *Key = B.CreateCall(RngFTy, RngFn, {}, "pac_key");
+  // key = kagura_random_u64()
+  Value *Key = B.CreateCall(Rng, {}, "pac_key");
+
+  // for each slot: slot ^= key
+  for (GlobalVariable *GV : Tagged) {
+    Value *Raw    = B.CreateAlignedLoad(Int64Ty, GV, Align(8),
+                                        /*isVolatile=*/false, "pac.init.raw");
+    Value *Retag  = B.CreateXor(Raw, Key, "pac.init.tagged");
+    B.CreateAlignedStore(Retag, GV, Align(8));
+  }
+
+  // kagura_pac_key = key
   B.CreateAlignedStore(Key, PacKey, Align(8));
   B.CreateRetVoid();
 
@@ -163,10 +221,11 @@ static GlobalVariable *tagGlobal(GlobalVariable *GV, Module &M) {
 
   Constant *Init = GV->getInitializer();
 
-  // Compute the compile-time tagged value.
-  // At compile time kagura_pac_key == 0, so tagged = ptr_to_int(fn) ^ 0
-  // = ptr_to_int(fn).  The XOR with the real key happens at runtime in
-  // the call-site rewrite (via kagura_pac_key load).
+  // The initializer holds the *untagged* value: a ConstantExpr cannot
+  // reference the key, which does not exist until kagura_init_pac_key runs.
+  // That constructor XORs this slot with the key it draws, which is what makes
+  // the `slot ^ kagura_pac_key` sequence at the call sites resolve back to the
+  // real pointer.  Neither half is correct without the other.
   Constant *TaggedInit;
   if (isa<ConstantPointerNull>(Init)) {
     TaggedInit = ConstantInt::get(Int64Ty, 0);
@@ -189,78 +248,59 @@ static GlobalVariable *tagGlobal(GlobalVariable *GV, Module &M) {
   return Tagged;
 }
 
-// ---- Rewrite load+call pairs ----
+// ---- Rewrite the uses of a software-tagged global ----
 
-/// For every LoadInst from TaggedGV that flows directly into a CallInst as the
-/// callee operand, insert XOR-untag + inttoptr before the call.  Returns the
-/// number of call sites rewritten.
-static unsigned rewriteLoadCallPairs(GlobalVariable *TaggedGV,
-                                      FunctionType *CalleeFTy, Module &M,
-                                      GlobalVariable *PacKey) {
+/// Move every use of GV onto the tagged i64 global, untagging on the way out
+/// and tagging on the way in.
+///
+/// The untag is placed at the *load*, not at the call.  The previous shape
+/// rewrote call sites and replaced the `ptr`-typed load with the `i64` one
+/// via replaceAllUsesWith — a type-mismatched RAUW, which aborts any build
+/// with assertions enabled and, without them, leaves transiently invalid IR
+/// that only becomes valid again because the offending use is erased a few
+/// lines later.  It also silently dropped every use that was not a direct
+/// call: a comparison against the pointer, or passing it as an argument, kept
+/// the raw tagged integer.  Untagging at the load makes all of those correct
+/// and removes the need to reconstruct the call at all — which in turn drops
+/// the old code's habit of rebuilding it with the *callee's* FunctionType
+/// rather than the call site's, an assertion failure whenever the two differ.
+static void rewriteSoftwareUses(GlobalVariable *GV, GlobalVariable *Tagged,
+                                Module &M, GlobalVariable *PacKey) {
   LLVMContext &Ctx   = M.getContext();
   auto *Int64Ty      = Type::getInt64Ty(Ctx);
   PointerType *PtrTy = PointerType::getUnqual(Ctx);
 
-  SmallVector<LoadInst *, 16> Loads;
-  for (auto &U : TaggedGV->uses()) {
-    auto *LI = dyn_cast<LoadInst>(U.getUser());
-    if (!LI)
-      continue;
-    Loads.push_back(LI);
-  }
+  // Snapshot: the loop erases as it goes.  isTaggableGlobal already rejected
+  // anything that is not a load or a store into the slot, so every user here
+  // is an Instruction of one of those two kinds.
+  SmallVector<Instruction *, 16> Uses;
+  for (User *U : GV->users())
+    Uses.push_back(cast<Instruction>(U));
 
-  unsigned Count = 0;
-  for (auto *LI : Loads) {
-    // Collect call uses of this load result.
-    SmallVector<CallInst *, 8> CallUses;
-    for (auto &U : LI->uses()) {
-      auto *CI = dyn_cast<CallInst>(U.getUser());
-      if (!CI)
-        continue;
-      // The load must feed the callee operand (not an argument).
-      if (CI->getCalledOperand() != LI)
-        continue;
-      CallUses.push_back(CI);
-    }
-    if (CallUses.empty())
-      continue;
-
-    // Insert untag sequence right after the load.
-    IRBuilder<> B(LI->getNextNode());
-
-    // raw_i64 = LI (already loaded as i64 from the tagged global)
-    // key     = load i64, @kagura_pac_key
+  for (Instruction *I : Uses) {
+    IRBuilder<> B(I);
     Value *Key = B.CreateAlignedLoad(Int64Ty, PacKey, Align(8),
                                      /*isVolatile=*/false, "pac.key");
-    // untagged_i64 = raw_i64 ^ key
-    Value *Untagged = B.CreateXor(LI, Key, "pac.untagged");
-    // fn_ptr = inttoptr(untagged_i64)
-    Value *FnPtr = B.CreateIntToPtr(Untagged, PtrTy, "pac.fn_ptr");
 
-    for (auto *CI : CallUses) {
-      // Replace the callee operand with the untagged function pointer.
-      // Build a new call instruction to get the right FunctionType.
-      IRBuilder<> CB(CI);
-      SmallVector<Value *, 8> Args(CI->args());
-      SmallVector<OperandBundleDef, 2> Bundles;
-      for (unsigned I = 0, E = CI->getNumOperandBundles(); I != E; ++I)
-        Bundles.emplace_back(CI->getOperandBundleAt(I));
-
-      CallInst *NewCI = CB.CreateCall(CalleeFTy, FnPtr, Args, Bundles, "");
-      NewCI->setCallingConv(CI->getCallingConv());
-      NewCI->setAttributes(CI->getAttributes());
-      NewCI->setTailCallKind(CI->getTailCallKind());
-      NewCI->setDebugLoc(CI->getDebugLoc());
-      if (CI->getType()->isFPOrFPVectorTy())
-        NewCI->copyFastMathFlags(CI);
-
-      if (!CI->getType()->isVoidTy())
-        CI->replaceAllUsesWith(NewCI);
-      CI->eraseFromParent();
-      ++Count;
+    if (auto *LI = dyn_cast<LoadInst>(I)) {
+      auto *Raw = B.CreateAlignedLoad(Int64Ty, Tagged, Align(8),
+                                      LI->isVolatile(), "pac.raw");
+      Raw->setDebugLoc(LI->getDebugLoc());
+      Value *Untagged = B.CreateXor(Raw, Key, "pac.untagged");
+      Value *FnPtr    = B.CreateIntToPtr(Untagged, PtrTy, "pac.fn_ptr");
+      LI->replaceAllUsesWith(FnPtr); // ptr for ptr — the types agree
+      LI->eraseFromParent();
+      continue;
     }
+
+    auto *SI  = cast<StoreInst>(I);
+    Value *Raw = B.CreatePtrToInt(SI->getValueOperand(), Int64Ty, "pac.raw");
+    Value *Tag = B.CreateXor(Raw, Key, "pac.tagged");
+    auto *NewSI =
+        B.CreateAlignedStore(Tag, Tagged, Align(8), SI->isVolatile());
+    NewSI->setDebugLoc(SI->getDebugLoc());
+    SI->eraseFromParent();
   }
-  return Count;
 }
 
 // ---- Hardware PAC helpers (arm64e, 4.1.8) --------------------------------
@@ -399,8 +439,11 @@ static unsigned hwPACRewriteLoadCallPairs(GlobalVariable *TaggedGV,
 // ---- Pass entry point ----
 
 PreservedAnalyses PointerAuthPass::run(Module &M, ModuleAnalysisManager &) {
-  if (!kagura::opt::PAC)
-    return PreservedAnalyses::all();
+  // No `if (!opt::PAC) return` here: whether this pass runs is decided when
+  // the pipeline is built (Plugin.cpp), and `opt -passes=kagura-pac` never
+  // sets the flag — so re-checking it made that entry point a silent no-op.
+  // See the note on shouldObfuscate() in Utils.h; the same fix was applied to
+  // the function passes and missed the module passes.
 
   // C.1: Pointer authentication uses hardware PAC (arm64e) or XOR tagging.
   // WebAssembly has neither native PAC nor mutable function-pointer globals
@@ -429,6 +472,9 @@ PreservedAnalyses PointerAuthPass::run(Module &M, ModuleAnalysisManager &) {
 
   GlobalVariable *PacKey = UseHardwarePAC ? nullptr : getOrCreatePacKey(M);
   bool Changed = false;
+
+  // The slots the key-init constructor has to XOR once the key exists.
+  SmallVector<GlobalVariable *, 32> SwTagged;
 
   for (auto *GV : Targets) {
     Constant *Init = GV->getInitializer();
@@ -467,24 +513,13 @@ PreservedAnalyses PointerAuthPass::run(Module &M, ModuleAnalysisManager &) {
     } else {
       // --- Software PAC path (all other targets) ---
       GlobalVariable *Tagged = tagGlobal(GV, M);
+      rewriteSoftwareUses(GV, Tagged, M, PacKey);
+      SwTagged.push_back(Tagged);
 
-      SmallVector<LoadInst *, 16> OrigLoads;
-      for (auto &U : GV->uses()) {
-        auto *LI = dyn_cast<LoadInst>(U.getUser());
-        if (LI) OrigLoads.push_back(LI);
-      }
-      for (auto *LI : OrigLoads) {
-        IRBuilder<> B(LI);
-        auto *NewLI = B.CreateAlignedLoad(Type::getInt64Ty(M.getContext()),
-                                          Tagged, Align(8),
-                                          LI->isVolatile(), "pac.raw");
-        NewLI->setDebugLoc(LI->getDebugLoc());
-        LI->replaceAllUsesWith(NewLI);
-        LI->eraseFromParent();
-      }
-
-      rewriteLoadCallPairs(Tagged, CalleeFTy, M, PacKey);
-      GV->replaceAllUsesWith(Tagged);
+      // hasOnlyRewritableUses() guaranteed every use was a load or a store
+      // into the slot, and rewriteSoftwareUses erased all of them, so nothing
+      // is left pointing at the ptr-typed global.
+      assert(GV->use_empty() && "untranslated use survived the rewrite");
       GV->eraseFromParent();
     }
 
@@ -494,10 +529,10 @@ PreservedAnalyses PointerAuthPass::run(Module &M, ModuleAnalysisManager &) {
   if (!Changed)
     return PreservedAnalyses::all();
 
-  if (!UseHardwarePAC) {
+  if (!UseHardwarePAC && !SwTagged.empty()) {
     // Build and register the software PAC key initialisation constructor.
     // Priority 65534 so it runs just before the thunk table constructor (65535).
-    Function *Ctor = buildPacKeyConstructor(M, PacKey);
+    Function *Ctor = buildPacKeyConstructor(M, PacKey, SwTagged);
     appendKaguraCtor(M, Ctor, CtorPriority::SwPAC);
   }
 
