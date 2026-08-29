@@ -40,6 +40,7 @@
 
 #ifdef __ANDROID__
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
@@ -70,32 +71,80 @@ static uint32_t read_le32(const uint8_t *p) {
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+/* Largest ZIP comment, and therefore the furthest back the EOCD can sit. */
+#define EOCD_MAX_COMMENT 65535
+/* Working window for the backwards scan.  See find_eocd(). */
+#define EOCD_CHUNK       4096
+
+/*
+ * Read exactly `len` bytes from `off` into `buf`.
+ *
+ * read(2) is permitted to return fewer bytes than asked for on a regular file
+ * - a signal arriving mid-call is enough - and every read in this file used to
+ * treat a short result as either "failure" or, worse in find_eocd's case, as a
+ * silently smaller search window in which the EOCD record simply was not
+ * found.  A repacked-APK detector that reports "clean" because a read got
+ * interrupted is not a detector.
+ *
+ * Returns 1 only when the full `len` bytes were obtained.
+ */
+static int read_exact(int fd, off_t off, uint8_t *buf, size_t len) {
+    if (lseek(fd, off, SEEK_SET) == (off_t)-1)
+        return 0;
+
+    size_t got = 0;
+    while (got < len) {
+        ssize_t n = read(fd, buf + got, len - got);
+        if (n > 0) { got += (size_t)n; continue; }
+        if (n < 0 && errno == EINTR) continue;
+        return 0;   /* EOF or hard error */
+    }
+    return 1;
+}
+
 /*
  * Locate the End-of-Central-Directory record in an open ZIP file.
  * Sets *eocd_offset to the file offset of the EOCD record.
  * Returns 1 on success, 0 on failure.
  */
 static int find_eocd(int fd, off_t file_size, off_t *eocd_offset) {
-    /* EOCD can have a variable-length comment of up to 65535 bytes.
-     * We search backwards from the end. */
-    uint8_t buf[EOCD_MIN_SIZE + 65535];
-    off_t search_len = (file_size < (off_t)sizeof(buf))
-                           ? file_size : (off_t)sizeof(buf);
+    /* EOCD can have a variable-length comment of up to 65535 bytes, so the
+     * record can be anywhere in the last ~64 KiB.  That whole window used to
+     * be a single `uint8_t buf[EOCD_MIN_SIZE + 65535]` local - 65 557 bytes of
+     * stack - in a function reachable from any thread the app cares to call it
+     * from.  Android's ART and Binder worker threads run on stacks well under
+     * that, so the check could overflow its caller's stack before reading a
+     * byte.  The window is now walked backwards in EOCD_CHUNK-sized pieces. */
+    off_t max_search  = (off_t)EOCD_MIN_SIZE + EOCD_MAX_COMMENT;
+    off_t search_len  = (file_size < max_search) ? file_size : max_search;
     off_t search_start = file_size - search_len;
 
-    if (lseek(fd, search_start, SEEK_SET) == (off_t)-1)
-        return 0;
+    uint8_t buf[EOCD_CHUNK];
+    /* Successive chunks overlap by one byte less than an EOCD record, so a
+     * record straddling a chunk boundary is still seen whole by one of them. */
+    const off_t overlap = (off_t)EOCD_MIN_SIZE - 1;
 
-    ssize_t n = read(fd, buf, (size_t)search_len);
-    if (n < EOCD_MIN_SIZE)
-        return 0;
+    off_t pos = file_size;   /* exclusive end of the chunk about to be read */
+    while (pos > search_start) {
+        off_t want = pos - search_start;
+        if (want > (off_t)sizeof(buf))
+            want = (off_t)sizeof(buf);
+        off_t start = pos - want;
 
-    /* Scan backwards for EOCD signature 0x504B0506 */
-    for (ssize_t i = n - EOCD_MIN_SIZE; i >= 0; --i) {
-        if (read_le32(buf + i) == EOCD_SIGNATURE) {
-            *eocd_offset = search_start + i;
-            return 1;
+        if (!read_exact(fd, start, buf, (size_t)want))
+            return 0;
+
+        /* Scan backwards for EOCD signature 0x504B0506 */
+        for (off_t i = want - EOCD_MIN_SIZE; i >= 0; --i) {
+            if (read_le32(buf + (size_t)i) == EOCD_SIGNATURE) {
+                *eocd_offset = start + i;
+                return 1;
+            }
         }
+
+        if (start == search_start)
+            break;
+        pos = start + overlap;   /* strictly decreasing: want > overlap here */
     }
     return 0;
 }
@@ -122,9 +171,7 @@ int kagura_apk_sig_present(const char *apk_path) {
 
     /* Read EOCD to get central-directory offset */
     uint8_t eocd[EOCD_MIN_SIZE];
-    if (lseek(fd, eocd_off, SEEK_SET) == (off_t)-1)
-        goto done;
-    if (read(fd, eocd, EOCD_MIN_SIZE) != EOCD_MIN_SIZE)
+    if (!read_exact(fd, eocd_off, eocd, EOCD_MIN_SIZE))
         goto done;
 
     uint32_t cd_offset = read_le32(eocd + 16); /* offset of CD start */
@@ -138,9 +185,7 @@ int kagura_apk_sig_present(const char *apk_path) {
         goto done;
 
     uint8_t tail[24];
-    if (lseek(fd, (off_t)cd_offset - 24, SEEK_SET) == (off_t)-1)
-        goto done;
-    if (read(fd, tail, 24) != 24)
+    if (!read_exact(fd, (off_t)cd_offset - 24, tail, 24))
         goto done;
 
     /* Check magic */
@@ -158,9 +203,7 @@ int kagura_apk_sig_present(const char *apk_path) {
         goto done;
 
     uint8_t header_size[8];
-    if (lseek(fd, block_start, SEEK_SET) == (off_t)-1)
-        goto done;
-    if (read(fd, header_size, 8) != 8)
+    if (!read_exact(fd, block_start, header_size, 8))
         goto done;
 
     uint64_t size_from_header = read_le64(header_size);

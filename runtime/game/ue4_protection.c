@@ -29,6 +29,20 @@
 #define ue4_fnv1a32(data, len) kagura_fnv1a32_buf((data), (len))
 
 /*
+ * 64-bit left rotate that is defined for a zero rotate count.
+ *
+ * `(v << s) | (v >> (64 - s))` is undefined behaviour when s == 0, because the
+ * right shift is then by the operand's full width (C11 6.5.7p3).  The caller
+ * takes s from `count & 0x3F`, and a vtable whose entry count is a multiple of
+ * 64 lands on s == 0 routinely.  Since the table protection is a self-inverse
+ * XOR, a key that comes out different on the second call leaves a live
+ * function-pointer table scrambled.
+ */
+static inline uint64_t rotl64(uint64_t v, unsigned s) {
+    return (v << s) | (v >> ((64u - s) & 63u));
+}
+
+/*
  * UE4 .pak file magic: little-endian u32 at the end-of-central-directory
  * record.  UE4 paks end with the 4-byte magic 0x5A6F12E1.
  */
@@ -179,7 +193,7 @@ void kagura_ue4_protect_function_table(void *vtable, size_t count) {
                        ^ (uint64_t)(count * UINT64_C(0x9E3779B97F4A7C15));
 
     unsigned shift = (unsigned)(count & 0x3Fu);
-    key = (key << shift) | (key >> (64u - shift));
+    key = rotl64(key, shift);
 
     for (size_t i = 0; i < count; ++i) {
         uint64_t entry_key = key ^ (uint64_t)(i * UINT64_C(0x517CC1B727220A95));

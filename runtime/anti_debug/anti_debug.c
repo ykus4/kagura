@@ -68,6 +68,11 @@ int kagura_check_maps(void) {
 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <unistd.h>
 
 int kagura_check_frida_port(void) {
@@ -76,13 +81,55 @@ int kagura_check_frida_port(void) {
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
-    addr.sin_family      = AF_INET;
-    addr.sin_port        = __builtin_bswap16(27042);
-    addr.sin_addr.s_addr = 0x0100007F; // 127.0.0.1
+    addr.sin_family = AF_INET;
+    // htons/htonl, not __builtin_bswap16 and a literal 0x0100007F.  Both of
+    // those spell the value out for a little-endian host, so on a big-endian
+    // target this probed a byte-swapped port at a byte-swapped address -
+    // always a miss, and the check silently did nothing.
+    addr.sin_port        = htons(27042);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-    int result = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+    // The connect must not block.  This runs from a startup-time anti-debug
+    // constructor, and on a host that DROPs rather than REFUSEs traffic to
+    // 127.0.0.1:27042 - a local firewall rule is enough - a blocking connect
+    // sits there for the full TCP connect timeout, tens of seconds, before the
+    // app's first frame.  runtime/windows/anti_debug.c already got this right
+    // with a 50 ms select(); this mirrors it with the POSIX spelling.
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags < 0 || fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+        // Cannot make it non-blocking: report "clean" rather than risk the
+        // stall.  A missed detection is recoverable, a frozen launch is not.
+        close(sock);
+        return 0;
+    }
+
+    int detected = 0;
+    if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+        detected = 1;                 // completed immediately (loopback)
+    } else if (errno == EINPROGRESS && sock < FD_SETSIZE) {
+        // FD_SET on a descriptor >= FD_SETSIZE writes past the fd_set; a
+        // process that already holds that many descriptors just skips the
+        // probe rather than corrupting its own stack.
+        fd_set wfds;
+        FD_ZERO(&wfds);
+        FD_SET(sock, &wfds);
+        struct timeval tv = { 0, 50000 };  // 50 ms, same budget as Windows
+        if (select(sock + 1, NULL, &wfds, NULL, &tv) > 0) {
+            // select() reports the socket writable both for a completed
+            // connect and for a refused one; SO_ERROR is what distinguishes
+            // them, and only a *successful* connect means Frida is listening.
+            int err = 0;
+            socklen_t len = sizeof(err);
+            if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len) == 0 &&
+                err == 0)
+                detected = 1;
+        }
+        // select() == 0 (timed out) is the DROP case: nothing is listening in
+        // any way we can observe, so treat it as clean.
+    }
+
     close(sock);
-    return result == 0 ? 1 : 0; // connected = Frida is running
+    return detected;
 }
 
 #endif // __linux__ || __APPLE__

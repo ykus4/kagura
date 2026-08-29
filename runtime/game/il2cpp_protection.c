@@ -47,6 +47,22 @@
 #define il2cpp_fnv1a32(data, len) kagura_fnv1a32_buf((data), (len))
 
 /*
+ * 64-bit left rotate that is defined for a zero rotate count.
+ *
+ * The obvious spelling, `(v << s) | (v >> (64 - s))`, is undefined behaviour
+ * when s == 0: the right operand becomes 64, and C11 6.5.7p3 makes a shift by
+ * the operand's width undefined.  That is not a theoretical concern here - the
+ * caller derives s from `count & 0x3F`, and a method table whose entry count is
+ * a multiple of 64 is the common case, so s == 0 happens routinely.  Whatever
+ * the compiler decides to emit for the undefined shift changes the key, and
+ * because the table protection is a self-inverse XOR the mismatch silently
+ * corrupts a live function-pointer table on the way back out.
+ */
+static inline uint64_t rotl64(uint64_t v, unsigned s) {
+    return (v << s) | (v >> ((64u - s) & 63u));
+}
+
+/*
  * IL2CPP global-metadata.dat magic bytes (little-endian u32 = 0xFAB11BAF).
  * Written at offset 0 of every valid metadata file.
  */
@@ -305,7 +321,7 @@ void kagura_il2cpp_protect_method_table(void *method_table, size_t count) {
      * (e.g., after dlclose/dlopen recycling).
      */
     unsigned shift = (unsigned)(count & 0x3Fu);
-    key = (key << shift) | (key >> (64u - shift));
+    key = rotl64(key, shift);
 
     for (size_t i = 0; i < count; ++i) {
         /*

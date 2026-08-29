@@ -210,8 +210,12 @@ void kagura_library_scan_check(void);
 int  kagura_symbol_interposed(void);
 void kagura_interposition_check(void);
 
-/* anti_dump.c */
-void kagura_poison_region(void *p, size_t n);
+/* anti_dump.c
+ * kagura_poison_region returns 1 only if the region was both zeroed AND made
+ * unreadable; 0 means the mprotect(PROT_NONE) failed and the (now zeroed)
+ * bytes are still mapped readable.  It used to return void, so a caller had no
+ * way to learn that the revocation half had not happened. */
+int  kagura_poison_region(void *p, size_t n);
 int  kagura_rwx_pages_present(void);
 int  kagura_anti_dump_check(void);
 void kagura_anti_dump_init(void);

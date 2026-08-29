@@ -23,10 +23,21 @@
  *      ptrace and that task_for_pid() is not callable (iOS only), which would
  *      allow a remote process to read our memory.
  *
+ * Signal-context caveat
+ * ---------------------
+ * The SIGSEGV guard installed by kagura_anti_dump_init() calls
+ * kagura_on_tamper_detected() from inside the handler.  The default policy in
+ * core/tamper_response.c is abort(), which POSIX lists as async-signal-safe.
+ * An application that supplies its own kagura_on_tamper_detected must keep it
+ * async-signal-safe as well: it can be entered from a signal handler on a
+ * crashing thread, where malloc, stdio and the loader locks are all potentially
+ * held by the interrupted code.
+ *
  * Public API
  * ----------
  *   void kagura_anti_dump_init(void);        // install SIGSEGV guard + checks
- *   void kagura_poison_region(void *p, size_t n); // zero + mprotect NONE
+ *   int  kagura_poison_region(void *p, size_t n); // zero + mprotect NONE;
+ *                                            // 1 = region also made unreadable
  *   int  kagura_rwx_pages_present(void);     // 1 = suspicious RWX mapping
  *   int  kagura_anti_dump_check(void);       // combined check; 1 = suspicious
  *
@@ -65,12 +76,20 @@
  *   a. volatile-write zeros (compiler cannot elide this).
  *   b. mprotect(PROT_NONE) to prevent further reads.
  *
+ * Returns 1 only when both steps succeeded, 0 when the region was zeroed but
+ * is still readable.  mprotect(2) genuinely fails in production - the range
+ * has to cover whole pages the caller actually owns, and rounding a stack or
+ * sub-page heap buffer up to page granularity walks into memory it does not.
+ * Swallowing that return value meant the function reported success to a caller
+ * that had just been told its key material was unreachable while it sat in
+ * plain sight, which is precisely the wrong way round for a security API.
+ *
  * Note: the caller is responsible for restoring permissions before the
  * region is needed again.  Typically called right after a decrypted buffer
  * has been consumed.
  */
-void kagura_poison_region(void *p, size_t n) {
-    if (!p || n == 0) return;
+int kagura_poison_region(void *p, size_t n) {
+    if (!p || n == 0) return 0;
 
     /* volatile memset to prevent optimisation */
     volatile uint8_t *vp = (volatile uint8_t *)p;
@@ -83,7 +102,10 @@ void kagura_poison_region(void *p, size_t n) {
     uintptr_t addr  = (uintptr_t)p & ~(uintptr_t)(page_sz - 1);
     size_t    aligned_len = n + ((uintptr_t)p - addr);
     aligned_len = (aligned_len + (size_t)(page_sz - 1)) & ~(size_t)(page_sz - 1);
-    mprotect((void *)addr, aligned_len, PROT_NONE);
+    return mprotect((void *)addr, aligned_len, PROT_NONE) == 0 ? 1 : 0;
+#else
+    /* Zeroed, but nothing on this platform revokes the mapping. */
+    return 0;
 #endif
 }
 
@@ -97,15 +119,31 @@ void kagura_poison_region(void *p, size_t n) {
  * mmap themselves as rwx to patch JIT code or intercept decryption calls).
  */
 int kagura_rwx_pages_present(void) {
-    int fd = open("/proc/self/maps", O_RDONLY);
+    int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
     if (fd < 0) return 0;
 
+    /*
+     * The tail of each chunk is almost never a complete line, so the leftover
+     * bytes are carried into the front of the next read rather than dropped.
+     * The previous version discarded them, which was wrong in both directions:
+     * a genuine rwxp mapping that happened to straddle a 4 KiB boundary was
+     * never seen, and the orphaned fragment that started the next chunk was
+     * parsed as if it were a line of its own, so a path containing something
+     * that looked like a permission field could be reported as a hit.
+     * /proc/self/maps is also not seekable in the usual sense and its contents
+     * are generated per-read, so re-reading to recover the line is not an
+     * option - it has to be stitched as we go.
+     */
     char buf[4096];
+    size_t carry = 0;         /* bytes of a partial line already at buf[0..] */
     ssize_t n;
     int found = 0;
 
-    while (!found && (n = read(fd, buf, sizeof(buf) - 1)) > 0) {
-        buf[n] = '\0';
+    while (!found &&
+           (n = read(fd, buf + carry, sizeof(buf) - 1 - carry)) > 0) {
+        size_t avail = carry + (size_t)n;
+        buf[avail] = '\0';
+
         char *line = buf;
         char *nl;
         while ((nl = strchr(line, '\n')) != NULL) {
@@ -120,6 +158,19 @@ int kagura_rwx_pages_present(void) {
                 }
             }
             line = nl + 1;
+        }
+        if (found) break;
+
+        /* Move whatever follows the last newline to the front of the buffer.
+         * A single line longer than the buffer cannot be completed, so the
+         * carry is dropped in that case to keep the read loop making progress
+         * (a maps line is ~80 bytes plus a path; 4 KiB is far beyond any real
+         * one). */
+        carry = avail - (size_t)(line - buf);
+        if (carry >= sizeof(buf) - 1) {
+            carry = 0;
+        } else if (carry > 0) {
+            memmove(buf, line, carry);
         }
     }
 
@@ -153,6 +204,14 @@ int kagura_rwx_pages_present(void) {
             !info.is_submap) {
             return 1;
         }
+
+        /* The walk advances only by `sz`, so a KERN_SUCCESS carrying sz == 0
+         * would spin on the same address forever.  vm_region_recurse_64 makes
+         * no promise about a non-zero size, and hanging inside an anti-dump
+         * check is a worse outcome than ending the scan early. */
+        if (sz == 0)
+            break;
+
         addr += sz;
     }
     return 0;
@@ -176,16 +235,41 @@ int kagura_anti_dump_check(void) {
 static struct sigaction g_prev_sigsegv_dump;
 
 static void dump_guard_sigsegv(int sig, siginfo_t *info, void *ctx) {
-    (void)sig; (void)info; (void)ctx;
     /* A SIGSEGV into one of our PROT_NONE guard regions indicates a
-     * linear memory scanner crossing a poisoned buffer boundary. */
+     * linear memory scanner crossing a poisoned buffer boundary.
+     *
+     * This runs in signal context.  The default hook in core/tamper_response.c
+     * is abort(), which POSIX lists as async-signal-safe, but an application
+     * that overrides kagura_on_tamper_detected is on the hook for keeping its
+     * replacement safe too - see the note in this file's header. */
     if (kagura_on_tamper_detected) kagura_on_tamper_detected();
-    /* Re-raise to default handler */
-    if (g_prev_sigsegv_dump.sa_handler != SIG_DFL &&
-        g_prev_sigsegv_dump.sa_handler != SIG_IGN)
-        g_prev_sigsegv_dump.sa_sigaction(sig, info, ctx);
-    else
-        raise(sig);
+
+    /*
+     * Chain to whatever was installed before us.  sa_handler and sa_sigaction
+     * are members of the same union on Linux and Darwin, so the previous shape
+     * of this code - test sa_handler, then call sa_sigaction - read one member
+     * and called through the other.  When the previous handler had been
+     * installed without SA_SIGINFO that meant calling a one-argument function
+     * through a three-argument pointer, which on a mismatched ABI corrupts the
+     * stack of a process that is already crashing.  SA_SIGINFO in sa_flags is
+     * the only thing that says which member is the live one.
+     */
+    if ((g_prev_sigsegv_dump.sa_flags & SA_SIGINFO) != 0) {
+        if (g_prev_sigsegv_dump.sa_sigaction != NULL) {
+            g_prev_sigsegv_dump.sa_sigaction(sig, info, ctx);
+            return;
+        }
+    } else if (g_prev_sigsegv_dump.sa_handler != SIG_DFL &&
+               g_prev_sigsegv_dump.sa_handler != SIG_IGN) {
+        g_prev_sigsegv_dump.sa_handler(sig);
+        return;
+    }
+
+    /* No usable predecessor.  Our handler carries no SA_RESETHAND, so raise()
+     * on its own would simply re-enter this function; putting the recorded
+     * disposition back first is what lets the default action actually run. */
+    sigaction(sig, &g_prev_sigsegv_dump, NULL);
+    raise(sig);
 }
 
 void kagura_anti_dump_init(void) {

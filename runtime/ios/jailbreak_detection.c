@@ -121,24 +121,29 @@ int kagura_check_substrate_dylib(void) {
 /**
  * kagura_check_sandbox_escape
  *
- * Attempts to create a file outside the application's sandbox container.
- * On a stock device this will fail with EPERM/EACCES.  On a jailbroken device
- * the sandbox may be partially or fully disabled, allowing the write to succeed.
+ * Asks whether the process is permitted to write into /private, which sits
+ * outside the application's sandbox container.  On a stock device the sandbox
+ * denies this with EPERM/EACCES; on a jailbroken device the restriction is
+ * partially or fully lifted.
  *
- * The test file is immediately unlinked if creation succeeds, so this function
- * has no lasting side effects on jailbroken devices.
+ * This probes with access(2) rather than by creating a file.  The previous
+ * implementation did fopen("/private/jailbreak_test_kagura", "w") and unlinked
+ * the result without checking whether the unlink succeeded - and on exactly the
+ * devices where the probe fires, the write side has already succeeded, so a
+ * failing unlink was entirely possible.  What it left behind was a file whose
+ * name contains the string "kagura", permanently, in a world-readable location:
+ * a fingerprint that identifies the app as kagura-protected to anyone who looks,
+ * which is the opposite of what an anti-tamper library should be doing.  A
+ * detection probe must not leave evidence of itself.
  *
- * Returns 1 if writing outside the sandbox succeeds, 0 otherwise.
+ * access(2) is subject to the same sandbox policy as the open would have been,
+ * so the answer is unchanged; only the side effect is gone.
+ *
+ * Returns 1 if writing outside the sandbox is permitted, 0 otherwise.
  */
 int kagura_check_sandbox_escape(void) {
-    static const char *TestPath = "/private/jailbreak_test_kagura";
-    FILE *f = fopen(TestPath, "w");
-    if (f) {
-        fclose(f);
-        unlink(TestPath);
-        return 1; /* write succeeded — sandbox is compromised */
-    }
-    return 0;
+    static const char *OutsideSandboxDir = "/private";
+    return access(OutsideSandboxDir, W_OK) == 0 ? 1 : 0;
 }
 
 /* --- Check 4: fork() availability --------------------------------------- */

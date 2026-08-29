@@ -157,6 +157,14 @@ int kagura_apple_wx_pages_present(void) {
                 return 1;
         }
 
+        /* `addr += size` is the only thing advancing the walk, so a
+         * KERN_SUCCESS with size == 0 would pin us on the same address
+         * forever.  The Mach interface does not promise a non-zero size, and
+         * an attacker who can shape the VM map should not be able to hang a
+         * startup-time integrity check. */
+        if (size == 0)
+            break;
+
         addr += size;
     }
 #endif /* __LP64__ */

@@ -100,6 +100,32 @@ struct got_scan_ctx {
     int found_hook;
 };
 
+/*
+ * Turn a d_un.d_ptr taken from the dynamic section into a usable address.
+ *
+ * Whether DT_STRTAB / DT_SYMTAB / DT_RELA already hold runtime addresses is
+ * not portable.  glibc's prelinked layout stores them pre-relocated, so
+ * reading them verbatim works there and that is what this code used to do.
+ * Bionic and any ordinary non-prelinked ELF store *link-time vaddrs*, which
+ * for a PIE or shared object are offsets from the load address: taking them
+ * verbatim yielded a pointer near zero, and the
+ * `strtab + symtab[sym_idx].st_name` dereference further down then read wild
+ * memory once per relocation of every loaded object.  On Android that is a
+ * segfault during startup hook detection.
+ *
+ * The two cases are told apart by magnitude, which is the standard heuristic:
+ * a value below the object's load address cannot be a runtime address inside
+ * that object, so it must still be a link-time vaddr and needs the bias added.
+ * A value at or above the load address is already relocated and is left alone.
+ * dlpi_addr is 0 for a non-PIE main executable, where both readings coincide
+ * and the heuristic is a no-op.
+ */
+static uintptr_t bias_ptr(const struct dl_phdr_info *info, ElfW(Addr) v) {
+    if ((uintptr_t)v < (uintptr_t)info->dlpi_addr)
+        return (uintptr_t)info->dlpi_addr + (uintptr_t)v;
+    return (uintptr_t)v;
+}
+
 static int got_phdr_cb(struct dl_phdr_info *info,
                                size_t size, void *data) {
     (void)size;
@@ -120,9 +146,9 @@ static int got_phdr_cb(struct dl_phdr_info *info,
 
         for (; dyn->d_tag != DT_NULL; ++dyn) {
             switch (dyn->d_tag) {
-            case DT_STRTAB:  strtab  = (const char *)dyn->d_un.d_ptr; break;
-            case DT_SYMTAB:  symtab  = (const ElfW(Sym) *)dyn->d_un.d_ptr; break;
-            case DT_RELA:    rela    = (const ElfW(Rela) *)dyn->d_un.d_ptr; break;
+            case DT_STRTAB:  strtab  = (const char *)bias_ptr(info, dyn->d_un.d_ptr); break;
+            case DT_SYMTAB:  symtab  = (const ElfW(Sym) *)bias_ptr(info, dyn->d_un.d_ptr); break;
+            case DT_RELA:    rela    = (const ElfW(Rela) *)bias_ptr(info, dyn->d_un.d_ptr); break;
             case DT_RELASZ:  rela_count = dyn->d_un.d_val / sizeof(ElfW(Rela)); break;
             default: break;
             }
