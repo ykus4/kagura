@@ -127,10 +127,11 @@ PreservedAnalyses BasicBlockSplittingPass::run(Function &F,
   if (!Changed)
     return PreservedAnalyses::all();
 
-  // SplitBlock preserves the dominator tree but invalidates CFGAnalyses.
-  PreservedAnalyses PA;
-  PA.preserve<DominatorTreeAnalysis>();
-  return PA;
+  // SplitBlock only updates a DominatorTree you hand it, and the call above
+  // passes none. The tree the analysis manager has cached is a different
+  // object and is now stale, so preserving DominatorTreeAnalysis handed the
+  // next pass a tree that does not describe this function.
+  return PreservedAnalyses::none();
 }
 
 } // namespace kagura

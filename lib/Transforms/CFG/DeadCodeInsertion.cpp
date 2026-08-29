@@ -107,9 +107,10 @@ PreservedAnalyses DeadCodeInsertionPass::run(Function &F,
   if (!Changed)
     return PreservedAnalyses::all();
 
-  PreservedAnalyses PA;
-  PA.preserveSet<CFGAnalyses>();
-  return PA;
+  // Not preserveSet<CFGAnalyses>(): that promises the block-and-edge set is
+  // unchanged, and this pass just added blocks. Claiming it left the cached
+  // DominatorTree and LoopInfo stale for whatever ran next.
+  return PreservedAnalyses::none();
 }
 
 } // namespace kagura

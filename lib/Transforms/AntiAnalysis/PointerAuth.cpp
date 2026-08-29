@@ -6,14 +6,18 @@
 // --- Software PAC (all targets) ---
 //
 // Simulates hardware PAC in software using XOR-tagging:
-//   1. The compile-time initializer is replaced with a tagged i64:
-//        tagged_val = ptr_to_int(original_fn) ^ kagura_pac_key
-//   2. Every LoadInst that feeds into a CallInst is rewritten:
-//        raw_i64  = load i64, @global
+//   1. The compile-time initializer becomes a plain i64 ptr_to_int(fn).  It
+//      cannot be tagged here: a ConstantExpr cannot reference kagura_pac_key,
+//      which does not have its value until run time.
+//   2. A constructor draws the key, XORs every slot from (1) with it, and
+//      publishes the key.  This is the step that makes the tag real; without
+//      it (2) and (3) disagree and every call jumps to fn ^ key.
+//   3. Every LoadInst is rewritten to untag at the load:
+//        raw_i64  = load i64, @global.pac
 //        untagged = raw_i64 ^ kagura_pac_key
 //        fn_ptr   = int_to_ptr(untagged)
-//        call fn_ptr(...)
-// The key is a runtime-initialised i64 global (kagura_pac_key).
+//      and every StoreInst tags on the way in, so the slot is never observed
+//      holding a value in the untagged domain after the constructor has run.
 //
 // --- Hardware PAC (arm64e targets only, 4.1.8) ---
 //
@@ -35,6 +39,9 @@
 //   - Globals whose initializer is not a Function constant or null
 //   - Globals whose name starts with "kagura_" or "llvm."
 //   - Globals with no uses (dead)
+//   - Globals with a use that is not a load or a store into the slot, since
+//     anything else can read or write the slot without going through the
+//     tag/untag sequence
 //
 //===----------------------------------------------------------------------===//
 
@@ -470,7 +477,16 @@ PreservedAnalyses PointerAuthPass::run(Module &M, ModuleAnalysisManager &) {
   Function *SignIntrinsic = UseHardwarePAC ? getPtrauthSignIntrinsic(M) : nullptr;
   Function *AuthIntrinsic = UseHardwarePAC ? getPtrauthAuthIntrinsic(M) : nullptr;
 
-  GlobalVariable *PacKey = UseHardwarePAC ? nullptr : getOrCreatePacKey(M);
+  // Created on first use, not up front: every target being null-initialised
+  // sends the loop below straight to `continue`, and the pass then reported
+  // PreservedAnalyses::all() having already added @kagura_pac_key to the
+  // module.
+  GlobalVariable *PacKey = nullptr;
+  auto pacKey = [&]() -> GlobalVariable * {
+    if (!PacKey)
+      PacKey = getOrCreatePacKey(M);
+    return PacKey;
+  };
   bool Changed = false;
 
   // The slots the key-init constructor has to XOR once the key exists.
@@ -513,7 +529,7 @@ PreservedAnalyses PointerAuthPass::run(Module &M, ModuleAnalysisManager &) {
     } else {
       // --- Software PAC path (all other targets) ---
       GlobalVariable *Tagged = tagGlobal(GV, M);
-      rewriteSoftwareUses(GV, Tagged, M, PacKey);
+      rewriteSoftwareUses(GV, Tagged, M, pacKey());
       SwTagged.push_back(Tagged);
 
       // hasOnlyRewritableUses() guaranteed every use was a load or a store

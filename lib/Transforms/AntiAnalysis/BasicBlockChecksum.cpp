@@ -60,6 +60,33 @@ PreservedAnalyses BasicBlockChecksumPass::run(Function &F,
   Module &M     = *F.getParent();
   LLVMContext &Ctx = M.getContext();
 
+  PRNG &RNG = getModulePRNG();
+  uint32_t BlockID = 0;
+
+  // Choose the blocks before touching the module.
+  //
+  // The two getOrInsertFunction calls below used to run first, so a function
+  // where the 30% draw never fired still added two declarations to the module
+  // and then returned PreservedAnalyses::all() — a mutation reported as no
+  // change. (A function pass adding module-level declarations at all is
+  // already outside what the new pass manager promises; doing it and denying
+  // it is worse.) Note the draw is consumed for every block, including the
+  // ones rejected afterwards, which is deliberate: the key stream must not
+  // depend on which blocks happen to be EH or entry.
+  SmallVector<std::pair<BasicBlock *, uint32_t>, 32> Targets;
+  for (auto &BB : F) {
+    ++BlockID;
+    // Instrument ~30% of blocks
+    if (RNG.nextRange(0, 100) >= 30) continue;
+    // Skip entry (too much mutation risk) and EH blocks
+    if (&BB == &F.getEntryBlock()) continue;
+    if (isEHBlock(BB)) continue;
+    Targets.push_back({&BB, BlockID});
+  }
+
+  if (Targets.empty())
+    return PreservedAnalyses::all();
+
   // Declare:  int  kagura_bb_check(uint32_t block_id, uint32_t expected);
   auto *Int32Ty = Type::getInt32Ty(Ctx);
   auto *FTy     = FunctionType::get(Int32Ty, {Int32Ty, Int32Ty}, false);
@@ -71,22 +98,10 @@ PreservedAnalyses BasicBlockChecksumPass::run(Function &F,
       "kagura_on_tamper_detected",
       FunctionType::get(VoidTy, false));
 
-  PRNG &RNG = getModulePRNG();
   bool Changed = false;
-  uint32_t BlockID = 0;
 
-  // Collect blocks first to avoid iterator invalidation.
-  SmallVector<BasicBlock *, 32> Blocks;
-  for (auto &BB : F)
-    Blocks.push_back(&BB);
-
-  for (auto *BB : Blocks) {
-    ++BlockID;
-    // Instrument ~30% of blocks
-    if (RNG.nextRange(0, 100) >= 30) continue;
-    // Skip entry (too much mutation risk) and EH blocks
-    if (BB == &F.getEntryBlock()) continue;
-    if (isEHBlock(*BB)) continue;
+  for (auto &[BB, ThisBlockID] : Targets) {
+    BlockID = ThisBlockID;
 
     uint32_t Cksum = bbChecksum(*BB);
 
