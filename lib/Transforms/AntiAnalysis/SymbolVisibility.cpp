@@ -82,8 +82,10 @@ static bool shouldHide(const GlobalValue &GV,
 
 PreservedAnalyses SymbolVisibilityPass::run(Module &M,
                                             ModuleAnalysisManager &) {
-  if (!kagura::opt::SV)
-    return PreservedAnalyses::all();
+  // No `if (!opt::SV) return` here: whether this pass runs is decided when the
+  // pipeline is built (Plugin.cpp), and `opt -passes=kagura-sv` never sets the
+  // flag — so re-checking it made that entry point a silent no-op. See the
+  // note on shouldObfuscate() in Utils.h.
 
   // Build the allowlist from the CLI option
   std::set<std::string> Allowlist(SVKeepSymbols.begin(), SVKeepSymbols.end());

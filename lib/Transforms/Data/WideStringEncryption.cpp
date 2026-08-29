@@ -364,8 +364,10 @@ static void buildRuntimeStringDecryptCtor(
 
 PreservedAnalyses WideStringEncryptionPass::run(Module &M,
                                                  ModuleAnalysisManager &) {
-  if (!kagura::opt::WSTR)
-    return PreservedAnalyses::all();
+  // No `if (!opt::WSTR) return` here: whether this pass runs is decided when
+  // the pipeline is built (Plugin.cpp), and `opt -passes=kagura-wstr` never
+  // sets the flag — so re-checking it made that entry point a silent no-op.
+  // See the note on shouldObfuscate() in Utils.h.
 
   auto &RNG    = getModulePRNG();
   bool Changed = false;

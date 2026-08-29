@@ -187,8 +187,10 @@ static void buildHoneyAnchorCtor(
 // ---- Pass entry point -------------------------------------------------------
 
 PreservedAnalyses HoneyValuePass::run(Module &M, ModuleAnalysisManager &) {
-  if (!kagura::opt::Honey)
-    return PreservedAnalyses::all();
+  // No `if (!opt::Honey) return` here: whether this pass runs is decided when
+  // the pipeline is built (Plugin.cpp), and `opt -passes=kagura-honey` never
+  // sets the flag — so re-checking it made that entry point a silent no-op.
+  // See the note on shouldObfuscate() in Utils.h.
 
   PRNG &RNG = getModulePRNG();
 
