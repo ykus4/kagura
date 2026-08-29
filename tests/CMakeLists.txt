@@ -158,6 +158,36 @@ set(KAGURA_LINK_SUBJECTS
   ${CMAKE_CURRENT_SOURCE_DIR}/pass-inputs/control_flow_test.c
 )
 
+# The system libraries runtime/CMakeLists.txt links PRIVATE.
+#
+# For a static library CMake records those in INTERFACE_LINK_LIBRARIES wrapped
+# in $<LINK_ONLY:>, so a consumer going through Kagura::kagura_runtime gets
+# them. This driver invokes clang with the archive path directly, which is the
+# point — it checks that the emitted calls resolve — so nothing propagates and
+# the system libraries have to be named here. Without them link_kagura-bbcheck
+# fails on Windows with an unresolved __imp_MapFileAndCheckSumA, which is
+# imagehlp, not anything kagura emitted.
+if(WIN32)
+  set(KAGURA_LINK_SYSLIBS -lws2_32 -limagehlp -lbcrypt)
+else()
+  set(KAGURA_LINK_SYSLIBS "")
+endif()
+
+# Passes whose emitted runtime calls have no Windows implementation.
+#
+# runtime/CMakeLists.txt documents the anti-debug half of this: AntiDebug.cpp
+# emits six kagura_check_* symbols that live in POSIX-only translation units,
+# and giving Windows real implementations is a design question rather than a
+# build-system one. CallIndirection is the same shape — it emits
+# kagura_rtld_default_handle, and the thunk resolution underneath is dlsym.
+#
+# Registered as WILL_FAIL rather than skipped, deliberately. A skip is how
+# these stayed invisible: the only Windows ctest run registered four tests
+# until this file stopped returning early. WILL_FAIL keeps them running, and
+# turns red the moment somebody implements the missing side — at which point
+# the entry below is what needs deleting.
+set(KAGURA_WIN32_LINK_GAPS kagura-anti-debug kagura-ci)
+
 # Function-level passes must be wrapped in function(...) for opt; module-level
 # passes are named directly. The registry already records which is which, so
 # read the macro name alongside the CLI name rather than maintaining a list.
@@ -183,9 +213,13 @@ foreach(_row IN LISTS KAGURA_PASS_ROWS)
         -DPIPELINE=${_pipeline}
         -DLABEL=${_cli}
         "-DSOURCES=${KAGURA_LINK_SUBJECTS}"
+        "-DSYSLIBS=${KAGURA_LINK_SYSLIBS}"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/run_link_test.cmake
     )
     set_tests_properties(link_${_cli} PROPERTIES LABELS link)
+    if(WIN32 AND _cli IN_LIST KAGURA_WIN32_LINK_GAPS)
+      set_tests_properties(link_${_cli} PROPERTIES WILL_FAIL TRUE)
+    endif()
   endif()
 endforeach()
 

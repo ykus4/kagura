@@ -276,13 +276,15 @@ jobs:
             -DKAGURA_BUILD_TESTS=ON \
             -DKAGURA_REQUIRE_LIT=ON
 
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      # After the build, not before it: this asks whether the artefact exists,
+      # and before `cmake --build` the answer is trivially no.
       - name: Confirm a loadable module really was built
         run: |
           test -f build/lib/Transforms/KaguraObfuscator.so \
             || { echo "::error::no loadable module — this job would duplicate static-plugin"; exit 1; }
-
-      - name: Build
-        run: cmake --build build -j$(nproc)
 
       - name: Test
         run: ctest --test-dir build --output-on-failure -j$(nproc)

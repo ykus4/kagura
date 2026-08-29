@@ -26,6 +26,12 @@
 #   PIPELINE  — pass pipeline for opt, e.g. "kagura-str" or "function(kagura-fla)"
 #   LABEL     — name used in temp files and diagnostics
 #   SOURCES   — ';'-separated list of C subjects to build
+#
+# Optional:
+#   SYSLIBS   — ';'-separated system libraries the runtime archive needs. CMake
+#               propagates these to a consumer of the imported target, but this
+#               driver links the archive by path on purpose, so they have to be
+#               passed in explicitly.
 
 include(${CMAKE_CURRENT_LIST_DIR}/kagura_driver.cmake)
 
@@ -63,7 +69,7 @@ foreach(_src IN LISTS SOURCES)
 
   # 3. Link. This is the step the suite never had.
   execute_process(
-    COMMAND ${CLANG} ${_obf} ${RUNTIME} -o ${_exe}
+    COMMAND ${CLANG} ${_obf} ${RUNTIME} ${SYSLIBS} -o ${_exe}
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
   if(NOT _rc EQUAL 0)
     string(APPEND _failures "\n--- ${LABEL}/${_stem}: link failed ---\n${_out}${_err}")
